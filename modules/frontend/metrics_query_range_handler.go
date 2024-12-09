@@ -11,16 +11,18 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level" //nolint:all //deprecated
+	"github.com/gogo/status"
 	"github.com/grafana/dskit/user"
 	"github.com/grafana/tempo/modules/frontend/combiner"
 	"github.com/grafana/tempo/modules/frontend/pipeline"
+	"google.golang.org/grpc/codes"
 
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/tempopb"
 )
 
 // newQueryRangeStreamingGRPCHandler returns a handler that streams results from the HTTP handler
-func newQueryRangeStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, logger log.Logger) streamingQueryRangeHandler {
+func newQueryRangeStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, qbm *QueryBudgetManager, logger log.Logger) streamingQueryRangeHandler {
 	postSLOHook := metricsSLOPostHook(cfg.Metrics.SLO)
 	downstreamPath := path.Join(apiPrefix, api.PathMetricsQueryRange)
 
@@ -35,6 +37,11 @@ func newQueryRangeStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripp
 		httpReq = httpReq.WithContext(ctx)
 		tenant, _ := user.ExtractOrgID(ctx)
 		start := time.Now()
+
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return status.Error(codes.ResourceExhausted, "too many queries in short amount of time, slow down")
+		}
 
 		var finalResponse *tempopb.QueryRangeResponse
 		c, err := combiner.NewTypedQueryRange(req, true)
@@ -56,13 +63,15 @@ func newQueryRangeStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripp
 			bytesProcessed = finalResponse.Metrics.InspectedBytes
 		}
 		postSLOHook(nil, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logQueryRangeResult(logger, tenant, duration.Seconds(), req, finalResponse, err)
 		return err
 	}
 }
 
 // newMetricsQueryRangeHTTPHandler returns a handler that returns a single response from the HTTP handler
-func newMetricsQueryRangeHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], logger log.Logger) http.RoundTripper {
+func newMetricsQueryRangeHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], qbm *QueryBudgetManager, logger log.Logger) http.RoundTripper {
 	postSLOHook := metricsSLOPostHook(cfg.Metrics.SLO)
 
 	return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -80,6 +89,14 @@ func newMetricsQueryRangeHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper
 			}, nil
 		}
 
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     http.StatusText(http.StatusTooManyRequests),
+				Body:       io.NopCloser(strings.NewReader("too many queries in short amount of time, slow down")),
+			}, nil
+		}
 		logQueryRangeRequest(logger, tenant, queryRangeReq)
 
 		// build and use roundtripper
@@ -105,6 +122,8 @@ func newMetricsQueryRangeHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper
 
 		duration := time.Since(start)
 		postSLOHook(resp, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logQueryRangeResult(logger, tenant, duration.Seconds(), queryRangeReq, queryRangeResp, err)
 		return resp, err
 	})

@@ -67,6 +67,7 @@ func newAsyncSearchSharder(reader tempodb.Reader, o overrides.Interface, cfg Sea
 func (s asyncSearchSharder) RoundTrip(pipelineRequest pipeline.Request) (pipeline.Responses[combiner.PipelineResponse], error) {
 	r := pipelineRequest.HTTPRequest()
 
+	// TODO: align the request to the 10s boundary
 	searchReq, err := api.ParseSearchRequest(r)
 	if err != nil {
 		return pipeline.NewBadRequest(err), nil
@@ -99,6 +100,7 @@ func (s asyncSearchSharder) RoundTrip(pipelineRequest pipeline.Request) (pipelin
 	// buffer of shards+1 allows us to insert ingestReq and metrics
 	reqCh := make(chan pipeline.Request, s.cfg.IngesterShards+1)
 
+	// FIXME: make sure request for last window is not time aligned??
 	// build request to search ingesters based on query_ingesters_until config and time range
 	// pass subCtx in requests so we can cancel and exit early
 	err = s.ingesterRequests(tenantID, pipelineRequest, *searchReq, reqCh)
@@ -169,6 +171,7 @@ func (s *asyncSearchSharder) backendRequests(ctx context.Context, tenantID strin
 	}
 
 	// calculate duration (start and end) to search the backend blocks
+	// again? time align the request to 10s boundary
 	start, end := backendRange(searchReq.Start, searchReq.End, s.cfg.QueryBackendAfter)
 
 	// no need to search backend

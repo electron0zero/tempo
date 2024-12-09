@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level" //nolint:all //deprecated
@@ -98,6 +99,9 @@ func New(cfg Config, next pipeline.RoundTripper, o overrides.Interface, reader t
 	queryValidatorWare := pipeline.NewQueryValidatorWare(cfg.MaxQueryExpressionSizeBytes)
 	headerStripWare := pipeline.NewStripHeadersWare(cfg.AllowedHeaders)
 
+	// this is used to limit the number of queries a tenant can issue
+	queryBudgetManager := NewQueryBudgetManager(time.Duration(0))
+
 	tracePipeline := pipeline.Build(
 		[]pipeline.AsyncMiddleware[combiner.PipelineResponse]{
 			headerStripWare,
@@ -179,16 +183,16 @@ func New(cfg Config, next pipeline.RoundTripper, o overrides.Interface, reader t
 		[]pipeline.Middleware{cacheWare, statusCodeWare, retryWare},
 		next)
 
-	traces := newTraceIDHandler(cfg, tracePipeline, o, combiner.NewTraceByID, logger)
-	tracesV2 := newTraceIDHandler(cfg, tracePipeline, o, combiner.NewTraceByIDV2, logger)
-	search := newSearchHTTPHandler(cfg, searchPipeline, logger)
+	traces := newTraceIDHandler(cfg, tracePipeline, o, combiner.NewTraceByID, queryBudgetManager, logger)
+	tracesV2 := newTraceIDHandler(cfg, tracePipeline, o, combiner.NewTraceByIDV2, queryBudgetManager, logger)
+	search := newSearchHTTPHandler(cfg, searchPipeline, queryBudgetManager, logger)
 	searchTags := newTagsHTTPHandler(cfg, searchTagsPipeline, o, logger)
 	searchTagsV2 := newTagsV2HTTPHandler(cfg, searchTagsPipeline, o, logger)
 	searchTagValues := newTagValuesHTTPHandler(cfg, searchTagValuesPipeline, o, logger)
-	searchTagValuesV2 := newTagValuesV2HTTPHandler(cfg, searchTagValuesPipeline, o, logger)
-	metrics := newMetricsSummaryHandler(metricsPipeline, logger)
-	queryInstant := newMetricsQueryInstantHTTPHandler(cfg, queryInstantPipeline, logger) // Reuses the same pipeline
-	queryRange := newMetricsQueryRangeHTTPHandler(cfg, queryRangePipeline, logger)
+	searchTagValuesV2 := newTagValuesV2HTTPHandler(cfg, searchTagValuesPipeline, o, queryBudgetManager, logger)
+	metrics := newMetricsSummaryHandler(metricsPipeline, queryBudgetManager, logger)
+	queryInstant := newMetricsQueryInstantHTTPHandler(cfg, queryInstantPipeline, queryBudgetManager, logger) // Reuses the same pipeline
+	queryRange := newMetricsQueryRangeHTTPHandler(cfg, queryRangePipeline, queryBudgetManager, logger)
 
 	return &QueryFrontend{
 		// http/discrete
@@ -204,13 +208,13 @@ func New(cfg Config, next pipeline.RoundTripper, o overrides.Interface, reader t
 		MetricsQueryRangeHandler:   newHandler(cfg.Config.LogQueryRequestHeaders, queryRange, logger),
 
 		// grpc/streaming
-		streamingSearch:       newSearchStreamingGRPCHandler(cfg, searchPipeline, apiPrefix, logger),
+		streamingSearch:       newSearchStreamingGRPCHandler(cfg, searchPipeline, apiPrefix, queryBudgetManager, logger),
 		streamingTags:         newTagsStreamingGRPCHandler(cfg, searchTagsPipeline, apiPrefix, o, logger),
 		streamingTagsV2:       newTagsV2StreamingGRPCHandler(cfg, searchTagsPipeline, apiPrefix, o, logger),
 		streamingTagValues:    newTagValuesStreamingGRPCHandler(cfg, searchTagValuesPipeline, apiPrefix, o, logger),
-		streamingTagValuesV2:  newTagValuesV2StreamingGRPCHandler(cfg, searchTagValuesPipeline, apiPrefix, o, logger),
-		streamingQueryRange:   newQueryRangeStreamingGRPCHandler(cfg, queryRangePipeline, apiPrefix, logger),
-		streamingQueryInstant: newQueryInstantStreamingGRPCHandler(cfg, queryRangePipeline, apiPrefix, logger), // Reuses the same pipeline
+		streamingTagValuesV2:  newTagValuesV2StreamingGRPCHandler(cfg, searchTagValuesPipeline, apiPrefix, o, queryBudgetManager, logger),
+		streamingQueryRange:   newQueryRangeStreamingGRPCHandler(cfg, queryRangePipeline, apiPrefix, queryBudgetManager, logger),
+		streamingQueryInstant: newQueryInstantStreamingGRPCHandler(cfg, queryRangePipeline, apiPrefix, queryBudgetManager, logger), // Reuses the same pipeline
 
 		cacheProvider: cacheProvider,
 		logger:        logger,
@@ -247,7 +251,7 @@ func (q *QueryFrontend) MetricsQueryInstant(req *tempopb.QueryInstantRequest, sr
 }
 
 // newSpanMetricsMiddleware creates a new frontend middleware to handle metrics-generator requests.
-func newMetricsSummaryHandler(next pipeline.AsyncRoundTripper[combiner.PipelineResponse], logger log.Logger) http.RoundTripper {
+func newMetricsSummaryHandler(next pipeline.AsyncRoundTripper[combiner.PipelineResponse], qbm *QueryBudgetManager, logger log.Logger) http.RoundTripper {
 	return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		tenant, err := user.ExtractOrgID(req.Context())
 		if err != nil {
@@ -258,6 +262,17 @@ func newMetricsSummaryHandler(next pipeline.AsyncRoundTripper[combiner.PipelineR
 				Body:       io.NopCloser(strings.NewReader(err.Error())),
 			}, nil
 		}
+		start := time.Now()
+
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     http.StatusText(http.StatusTooManyRequests),
+				Body:       io.NopCloser(strings.NewReader("too many queries in short amount of time, slow down")),
+			}, nil
+		}
+
 		prepareRequestForQueriers(req, tenant)
 		// This API is always json because it only ever has 1 job and this
 		// lets us return the response as-is.
@@ -274,6 +289,9 @@ func newMetricsSummaryHandler(next pipeline.AsyncRoundTripper[combiner.PipelineR
 		}
 
 		resp, _, err := resps.Next(req.Context()) // metrics path will only ever have one response
+
+		duration := time.Since(start)
+		qbm.SpendBudget(tenant, duration.Seconds())
 
 		level.Info(logger).Log(
 			"msg", "metrics summary response",

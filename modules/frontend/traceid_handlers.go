@@ -16,7 +16,7 @@ import (
 )
 
 // newTraceIDHandler creates a http.handler for trace by id requests
-func newTraceIDHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], o overrides.Interface, combinerFn func(int, string) combiner.Combiner, logger log.Logger) http.RoundTripper {
+func newTraceIDHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], o overrides.Interface, combinerFn func(int, string) combiner.Combiner, qbm *QueryBudgetManager, logger log.Logger) http.RoundTripper {
 	postSLOHook := traceByIDSLOPostHook(cfg.TraceByID.SLO)
 
 	return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -50,6 +50,15 @@ func newTraceIDHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.Pipe
 			}, nil
 		}
 
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     http.StatusText(http.StatusTooManyRequests),
+				Body:       io.NopCloser(strings.NewReader("too many queries in short amount of time, slow down")),
+			}, nil
+		}
+
 		// check marshalling format
 		marshallingFormat := api.HeaderAcceptJSON
 		if req.Header.Get(api.HeaderAccept) == api.HeaderAcceptProtobuf {
@@ -73,6 +82,7 @@ func newTraceIDHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.Pipe
 
 		postSLOHook(resp, tenant, 0, elapsed, err)
 
+		qbm.SpendBudget(tenant, elapsed.Seconds())
 		level.Info(logger).Log(
 			"msg", "trace id response",
 			"tenant", tenant,

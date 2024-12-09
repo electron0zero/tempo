@@ -139,7 +139,7 @@ func newTagValuesStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTrippe
 	}
 }
 
-func newTagValuesV2StreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, o overrides.Interface, logger log.Logger) streamingTagValuesV2Handler {
+func newTagValuesV2StreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, o overrides.Interface, qbm *QueryBudgetManager, logger log.Logger) streamingTagValuesV2Handler {
 	postSLOHook := metadataSLOPostHook(cfg.Search.MetadataSLO)
 
 	return func(req *tempopb.SearchTagValuesRequest, srv tempopb.StreamingQuerier_SearchTagValuesV2Server) error {
@@ -160,6 +160,11 @@ func newTagValuesV2StreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTrip
 			return srv.Send(res)
 		})
 
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return status.Error(codes.ResourceExhausted, "too many queries in short amount of time, slow down")
+		}
+
 		start := time.Now()
 		logTagValuesRequest(logger, tenant, "SearchTagValuesV2Streaming", req.TagName, req.Query, req.End-req.Start)
 		err = collector.RoundTrip(httpReq)
@@ -170,6 +175,8 @@ func newTagValuesV2StreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTrip
 			bytesProcessed = finalResponse.Metrics.InspectedBytes
 		}
 		postSLOHook(nil, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logTagValuesResult(logger, tenant, "SearchTagValuesV2Streaming", req.TagName, req.Query, req.End-req.Start, duration.Seconds(), bytesProcessed, err)
 
 		return err
@@ -281,7 +288,7 @@ func newTagValuesHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combine
 	})
 }
 
-func newTagValuesV2HTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], o overrides.Interface, logger log.Logger) http.RoundTripper {
+func newTagValuesV2HTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], o overrides.Interface, qbm *QueryBudgetManager, logger log.Logger) http.RoundTripper {
 	postSLOHook := metadataSLOPostHook(cfg.Search.MetadataSLO)
 
 	return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -289,6 +296,15 @@ func newTagValuesV2HTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combi
 		tenant, errResp, err := extractTenantWithErrorResp(req, logger)
 		if err != nil {
 			return errResp, nil
+		}
+
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     http.StatusText(http.StatusTooManyRequests),
+				Body:       io.NopCloser(strings.NewReader("too many queries in short amount of time, slow down")),
+			}, nil
 		}
 
 		_, query, rangeDur := parseParams(req)
@@ -311,6 +327,8 @@ func newTagValuesV2HTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combi
 
 		duration := time.Since(start)
 		postSLOHook(resp, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logTagValuesResult(logger, tenant, "SearchTagValuesV2", tagName, query, rangeDur, duration.Seconds(), bytesProcessed, err)
 
 		return resp, err

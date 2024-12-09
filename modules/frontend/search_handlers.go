@@ -23,7 +23,7 @@ import (
 )
 
 // newSearchStreamingGRPCHandler returns a handler that streams results from the HTTP handler
-func newSearchStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, logger log.Logger) streamingSearchHandler {
+func newSearchStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], apiPrefix string, qbm *QueryBudgetManager, logger log.Logger) streamingSearchHandler {
 	postSLOHook := searchSLOPostHook(cfg.Search.SLO)
 	downstreamPath := path.Join(apiPrefix, api.PathSearch)
 
@@ -49,6 +49,11 @@ func newSearchStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[c
 			return status.Errorf(codes.InvalidArgument, "adjust limit: %s", err.Error())
 		}
 
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return status.Error(codes.ResourceExhausted, "too many queries in short amount of time, slow down")
+		}
+
 		var finalResponse *tempopb.SearchResponse
 		comb := combiner.NewTypedSearch(int(limit))
 		collector := pipeline.NewGRPCCollector[*tempopb.SearchResponse](next, cfg.ResponseConsumers, comb, func(sr *tempopb.SearchResponse) error {
@@ -65,18 +70,29 @@ func newSearchStreamingGRPCHandler(cfg Config, next pipeline.AsyncRoundTripper[c
 			bytesProcessed = finalResponse.Metrics.InspectedBytes
 		}
 		postSLOHook(nil, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logResult(logger, tenant, duration.Seconds(), req, finalResponse, nil, err)
 		return err
 	}
 }
 
 // newSearchHTTPHandler returns a handler that returns a single response from the HTTP handler
-func newSearchHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], logger log.Logger) http.RoundTripper {
+func newSearchHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.PipelineResponse], qbm *QueryBudgetManager, logger log.Logger) http.RoundTripper {
 	postSLOHook := searchSLOPostHook(cfg.Search.SLO)
 
 	return RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		tenant, _ := user.ExtractOrgID(req.Context())
 		start := time.Now()
+
+		// tenant is querying too fast, and used all the query seconds. rate limit them
+		if qbm.IsExhausted(tenant) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Status:     http.StatusText(http.StatusTooManyRequests),
+				Body:       io.NopCloser(strings.NewReader("too many queries in short amount of time, slow down")),
+			}, nil
+		}
 
 		// parse request
 		searchReq, err := api.ParseSearchRequest(req)
@@ -117,6 +133,8 @@ func newSearchHTTPHandler(cfg Config, next pipeline.AsyncRoundTripper[combiner.P
 
 		duration := time.Since(start)
 		postSLOHook(resp, tenant, bytesProcessed, duration, err)
+
+		qbm.SpendBudget(tenant, duration.Seconds())
 		logResult(logger, tenant, duration.Seconds(), searchReq, searchResp, resp, err)
 		return resp, err
 	})
