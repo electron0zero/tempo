@@ -134,11 +134,11 @@ func fetchMetaData(tenantID string) (*MetaData, error) {
 	md.SpanTags = spanTags
 
 	// results of v2/search/tags?scope=resource
-	resourceTagsRsp, err2 := client.SearchTagsV2WithScope("resource")
-	if err2 != nil {
+	resourceTagsRsp, err := client.SearchTagsV2WithScope("resource")
+	if err != nil {
 		// if we can't get the resource tags we can't optimize the query
-		fmt.Printf("optimizeConditions: failed to get resource tags, err: %s\n", err.Error())
-		return nil, err2
+		fmt.Printf("optimizeConditions: failed to get resource tags, err: %s\n", err)
+		return nil, err
 	}
 	resourceTags := make(map[string]string)
 	for _, scope := range resourceTagsRsp.Scopes {
@@ -157,16 +157,16 @@ func fetchMetaData(tenantID string) (*MetaData, error) {
 // optimizeConditions will optimize the un-scoped conditions to scoped conditions if the attribute
 // is only found on span or resource attributes in the metadata.
 func optimizeConditions(ctx context.Context, spanReq *FetchSpansRequest) *FetchSpansRequest {
-	tenantID, err1 := user.ExtractOrgID(ctx)
-	if err1 != nil {
+	tenantID, err := user.ExtractOrgID(ctx)
+	if err != nil {
 		// if we can't get the tenantID, we can't optimize the query
-		fmt.Printf("optimizeConditions: failed to extract tenantID, err: %s\n", err1.Error())
+		fmt.Printf("optimizeConditions: failed to extract tenantID, err: %s\n", err)
 		return spanReq
 	}
 
 	md, err := PerTenantMetaDataStore.GetMetaData(tenantID)
 	if err != nil {
-		fmt.Printf("optimizeConditions: failed to get metadata, err: %s\n", err.Error())
+		fmt.Printf("optimizeConditions: failed to get metadata, err: %s\n", err)
 		return spanReq
 	}
 
