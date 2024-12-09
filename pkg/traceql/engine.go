@@ -55,6 +55,11 @@ func (e *Engine) ExecuteSearch(ctx context.Context, searchReq *tempopb.SearchReq
 		return nil, err
 	}
 
+	// if possible, optimize the un-scoped conditions into scoped conditions using the metadata
+	fetchSpansRequest = optimizeConditions(ctx, fetchSpansRequest)
+
+	fmt.Printf("optimizeConditions: updated fetchSpansRequest.Conditions: %v\n", fetchSpansRequest.Conditions)
+
 	fetchSpansRequest.StartTimeUnixNanos = unixSecToNano(searchReq.Start)
 	fetchSpansRequest.EndTimeUnixNanos = unixSecToNano(searchReq.End)
 
