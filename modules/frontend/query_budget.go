@@ -66,14 +66,14 @@ func (qbm *QueryBudgetManager) GetBudgetLeft(tenantID string) float64 {
 	if !ok {
 		return MaxQueryBudget
 	}
-
 	return budget.budgetLeft
 }
 
 func (qbm *QueryBudgetManager) IsExhausted(tenantID string) bool {
-	budget := qbm.GetBudgetLeft(tenantID)
-	if budget <= 0 {
-		fmt.Printf("budget exhausted for tenant %s\n", tenantID)
+	budgetLeft := qbm.GetBudgetLeft(tenantID)
+	fmt.Printf("==== checking if query budget is exhausted for tenant %s, budgetLeft: %f\n", tenantID, budgetLeft)
+	if budgetLeft <= 0 {
+		fmt.Printf("==== budget exhausted for tenant %s, budgetLeft: %f\n", tenantID, budgetLeft)
 		return true
 	}
 	return false
@@ -83,7 +83,7 @@ func (qbm *QueryBudgetManager) SpendBudget(tenantID string, secondsUsed float64)
 	qbm.mtx.Lock()
 	defer qbm.mtx.Unlock()
 
-	fmt.Printf("spending %f seconds for tenant %s\n", secondsUsed, tenantID)
+	fmt.Printf("==== spending %f seconds for tenant %s\n", secondsUsed, tenantID)
 
 	b, ok := qbm.budgets[tenantID]
 	if !ok {
@@ -103,21 +103,22 @@ func (qbm *QueryBudgetManager) refresh() {
 	fmt.Printf("refreshing query budget every %s\n", qbm.refreshInterval)
 
 	for range ticker.C {
-		fmt.Println("refreshing query budget...")
 		qbm.mtx.Lock()
 		for tenantID, budget := range qbm.budgets {
-			fmt.Printf("refreshing budget for tenant %s\n", tenantID)
+			fmt.Printf("==== refreshing budget for tenant %s\n", tenantID)
 			// add more budget to each tenant at the refresh interval
 			budget.budgetLeft += DefaultAddBudgetOnRefresh
 			budget.lastUpdated = time.Now()
 			// if the tenant is exceeding the max budget, remove them from the map
 			// this will allow them to be added with the default budget if they issue a new query
 			if budget.budgetLeft > MaxQueryBudget {
+				fmt.Printf("==== setting budget to max query budget for tenant %s\n", tenantID)
 				delete(qbm.budgets, tenantID)
+			} else {
+				fmt.Printf("==== setting budget to %f for tenant %s\n", budget.budgetLeft, tenantID)
 			}
 		}
-		fmt.Println("refreshed query budget")
-		fmt.Println(qbm.budgets)
+		fmt.Println("==== refreshed query budget for all tenants")
 		qbm.mtx.Unlock()
 	}
 }
