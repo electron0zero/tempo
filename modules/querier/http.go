@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/grafana/tempo/modules/frontend/combiner"
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/model/trace"
 	"github.com/grafana/tempo/pkg/tempopb"
@@ -479,6 +480,28 @@ func writeFormattedContentForRequest(w http.ResponseWriter, req *http.Request, m
 		}
 		if span != nil {
 			span.SetAttributes(attribute.String("contentType", api.HeaderAcceptProtobuf))
+		}
+
+	case api.HeaderAcceptLLM:
+		contentType := api.HeaderAcceptLLM + "+json"
+		body, err := combiner.MarshalResponseToLLM(m)
+		if err != nil {
+			// fallback to JSON for unsupported types
+			w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
+			err = new(jsonpb.Marshaler).Marshal(w, m)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		w.Header().Set(api.HeaderContentType, contentType)
+		_, err = fmt.Fprint(w, body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if span != nil {
+			span.SetAttributes(attribute.String("contentType", contentType))
 		}
 
 	default:

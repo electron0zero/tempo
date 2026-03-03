@@ -8,7 +8,7 @@ Compare two traces by ID and get a merged trace where every span is annotated wi
 GET /api/v2/traces/diff?base={traceID}&next={traceID}
 ```
 
-Returns the same `TraceByIDResponse` JSON format as `/api/v2/traces/{traceID}`. Each span gets a `tempo.diff.status` attribute:
+Returns the same `TraceByIDResponse` format as `/api/v2/traces/{traceID}`. Supports JSON, protobuf, and LLM (`application/vnd.grafana.llm`) response formats via the `Accept` header. Each span gets a `tempo.diff.status` attribute:
 
 | Status | Meaning |
 |---|---|
@@ -126,7 +126,48 @@ Expected output:
 curl -s "http://localhost:3200/api/v2/traces/diff?base=${BASE}&next=${NEXT}" | jq .
 ```
 
-### 5. Run unit tests
+**LLM format** (simplified JSON for AI/LLM consumption):
+
+```bash
+curl -s -H 'Accept: application/vnd.grafana.llm' \
+  "http://localhost:3200/api/v2/traces/diff?base=${BASE}&next=${NEXT}" | jq .
+```
+
+The LLM format flattens attributes, converts IDs to hex strings, and adds computed `durationMs` to each span. The `tempo.diff.status` attribute appears in each span's `attributes` map.
+
+### 5. Test via CLI
+
+Build the CLI:
+
+```bash
+make tempo-cli
+```
+
+Run a diff:
+
+```bash
+./bin/tempo-cli query api trace-diff http://localhost:3200 <baseTraceID> <nextTraceID>
+```
+
+Optional `--org-id` flag for multi-tenant setups:
+
+```bash
+./bin/tempo-cli query api trace-diff --org-id=my-tenant http://localhost:3200 <baseTraceID> <nextTraceID>
+```
+
+Output is the full `TraceByIDResponse` as JSON, same as `query api trace-id`.
+
+### 6. Test via MCP
+
+The MCP server (when enabled via `query_frontend.mcp_server.enabled: true`) exposes a `diff-traces` tool.
+
+**Tool parameters:**
+- `base_trace_id` (required) - base trace ID to compare from
+- `next_trace_id` (required) - next trace ID to compare to
+
+The MCP tool returns the diff in LLM format automatically. You can test it via any MCP client connected to `http://localhost:3200/api/mcp`.
+
+### 7. Run unit tests
 
 From the repo root:
 
@@ -136,7 +177,7 @@ go test ./pkg/model/trace/... -run TestDiff -v
 
 Expected: all 9 test cases pass.
 
-### 6. Tear down
+### 8. Tear down
 
 ```bash
 cd example/docker-compose/single-binary
@@ -167,5 +208,12 @@ docker logs single-binary-tempo-1 2>&1 | tail -20
 | `pkg/api/http.go` | `PathTraceDiff` constant, `ParseTraceDiffRequest` function |
 | `pkg/model/trace/diff.go` | `DiffTraces` - core diff algorithm |
 | `pkg/model/trace/diff_test.go` | Unit tests for diff logic |
-| `modules/querier/http.go` | `TraceDiffHandler` HTTP handler |
+| `modules/querier/http.go` | `TraceDiffHandler` HTTP handler, LLM format in response writer |
+| `modules/frontend/combiner/llm_marshaler.go` | Exported `MarshalResponseToLLM` for reuse |
+| `modules/frontend/frontend.go` | `TraceDiffHandler` field on `QueryFrontend` |
+| `modules/frontend/mcp.go` | `diff-traces` MCP tool registration |
+| `modules/frontend/mcp_tools.go` | `handleDiffTraces` MCP handler |
 | `cmd/tempo/app/modules.go` | Route registration at querier and frontend levels |
+| `pkg/httpclient/client.go` | `QueryTraceDiff` HTTP client method |
+| `cmd/tempo-cli/cmd-query-trace-diff.go` | CLI `query api trace-diff` command |
+| `cmd/tempo-cli/main.go` | CLI command registration |

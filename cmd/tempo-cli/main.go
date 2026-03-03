@@ -69,6 +69,7 @@ var cli struct {
 	Query struct {
 		API struct {
 			TraceID         queryTraceIDCmd         `cmd:"" help:"query Tempo by trace ID"`
+			TraceDiff       queryTraceDiffCmd       `cmd:"" help:"diff two traces by ID"`
 			SearchTags      querySearchTagsCmd      `cmd:"" help:"query Tempo search tags"`
 			SearchTagValues querySearchTagValuesCmd `cmd:"" help:"query Tempo search tag values"`
 			Search          querySearchCmd          `cmd:"" help:"query Tempo search"`

@@ -82,6 +82,12 @@ type LLMSearchTagValuesV2Response struct {
 	Metrics   *LLMMetrics         `json:"metrics,omitempty"`
 }
 
+// MarshalResponseToLLM marshals a proto message to LLM-optimized JSON format.
+// Returns util.ErrUnsupported for unsupported message types.
+func MarshalResponseToLLM(t proto.Message) (string, error) {
+	return new(llmMarshaler).marshalToString(t)
+}
+
 func (m *llmMarshaler) marshalToString(t proto.Message) (string, error) {
 	// unsupported: *tempopb.Trace, *tempopb.SearchTagsResponse, *tempopb.SearchTagValuesResponse, *tempopb.QueryRangeResponse
 

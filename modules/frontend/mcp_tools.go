@@ -264,6 +264,35 @@ func (s *MCPServer) handleGetTrace(ctx context.Context, request mcp.CallToolRequ
 	return toolResult(body, MetaTypeTrace, "json", "2"), nil
 }
 
+// handleDiffTraces handles the diff-traces tool
+func (s *MCPServer) handleDiffTraces(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	metricMCPToolCalls.WithLabelValues(toolDiffTraces).Inc()
+
+	baseTraceID, err := request.RequireString("base_trace_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	nextTraceID, err := request.RequireString("next_trace_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	level.Info(s.logger).Log("msg", "diffing traces", "base_trace_id", baseTraceID, "next_trace_id", nextTraceID)
+
+	diffURL := s.buildPath(api.PathTraceDiff) + "?base=" + url.QueryEscape(baseTraceID) + "&next=" + url.QueryEscape(nextTraceID)
+	httpReq := &http.Request{
+		Method: "GET",
+		URL:    &url.URL{Path: diffURL, RawQuery: "base=" + url.QueryEscape(baseTraceID) + "&next=" + url.QueryEscape(nextTraceID)},
+	}
+
+	body, err := handleHTTP(ctx, s.frontend.TraceDiffHandler, httpReq)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return toolResult(body, MetaTypeTrace, "json", "2"), nil
+}
+
 // handleGetAttributeNames handles the get-attribute-names tool
 func (s *MCPServer) handleGetAttributeNames(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	metricMCPToolCalls.WithLabelValues(toolGetAttributeNames).Inc()
