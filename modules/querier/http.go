@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/model/trace"
 	"github.com/grafana/tempo/pkg/tempopb"
+	"github.com/grafana/tempo/tempodb"
 )
 
 const (
@@ -125,6 +126,51 @@ func (q *Querier) TraceByIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 		handleError(w, err)
 		return
 	}
+	writeFormattedContentForRequest(w, r, resp, span)
+}
+
+func (q *Querier) TraceDiffHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.TraceByID.QueryTimeout))
+	defer cancel()
+
+	ctx, span := tracer.Start(ctx, "Querier.TraceDiffHandler")
+	defer span.End()
+
+	baseID, nextID, err := api.ParseTraceDiffRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	makeReq := func(traceID []byte) *tempopb.TraceByIDRequest {
+		return &tempopb.TraceByIDRequest{
+			TraceID:           traceID,
+			BlockStart:        tempodb.BlockIDMin,
+			BlockEnd:          tempodb.BlockIDMax,
+			QueryMode:         QueryModeAll,
+			AllowPartialTrace: true,
+		}
+	}
+
+	// Fetch both traces. Sequential is fine for a POC.
+	baseResp, err := q.FindTraceByID(ctx, makeReq(baseID), 0, 0)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	nextResp, err := q.FindTraceByID(ctx, makeReq(nextID), 0, 0)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	diffTrace := trace.DiffTraces(baseResp.Trace, nextResp.Trace)
+
+	resp := &tempopb.TraceByIDResponse{
+		Trace:   diffTrace,
+		Metrics: &tempopb.TraceByIDMetrics{},
+	}
+
 	writeFormattedContentForRequest(w, r, resp, span)
 }
 
