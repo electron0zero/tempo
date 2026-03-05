@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-type queryMCPConfigCmd struct {
+type mcpConfigCmd struct {
 	APIEndpoint string `arg:"" help:"tempo api endpoint"`
 	OrgID       string `help:"optional orgID"`
 	Claude      bool   `help:"print Claude Code MCP config"`
@@ -13,7 +13,7 @@ type queryMCPConfigCmd struct {
 	Windsurf    bool   `help:"print Windsurf MCP config"`
 }
 
-func (cmd *queryMCPConfigCmd) Run(_ *globalOptions) error {
+func (cmd *mcpConfigCmd) Run(_ *globalOptions) error {
 	mcpURL := buildMCPURL(cmd.APIEndpoint)
 
 	// If no specific flag, print all

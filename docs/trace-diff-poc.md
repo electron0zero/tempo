@@ -172,25 +172,25 @@ Optional `--org-id` flag for multi-tenant setups:
 **Check MCP server health:**
 
 ```bash
-./bin/tempo-cli query api mcp-status http://localhost:3200
+./bin/tempo-cli mcp status http://localhost:3200
 ```
 
 **List available MCP tools:**
 
 ```bash
-./bin/tempo-cli query api mcp-tools http://localhost:3200
+./bin/tempo-cli mcp tools http://localhost:3200
 ```
 
 **Get agent config snippets** (prints all agents by default, or filter with flags):
 
 ```bash
 # All agents
-./bin/tempo-cli query api mcp-config http://localhost:3200
+./bin/tempo-cli mcp config http://localhost:3200
 
 # Specific agent
-./bin/tempo-cli query api mcp-config http://localhost:3200 --claude
-./bin/tempo-cli query api mcp-config http://localhost:3200 --cursor
-./bin/tempo-cli query api mcp-config http://localhost:3200 --windsurf
+./bin/tempo-cli mcp config http://localhost:3200 --claude
+./bin/tempo-cli mcp config http://localhost:3200 --cursor
+./bin/tempo-cli mcp config http://localhost:3200 --windsurf
 ```
 
 ### 7. Test via MCP

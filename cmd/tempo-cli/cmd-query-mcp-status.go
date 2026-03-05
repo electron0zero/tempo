@@ -13,12 +13,12 @@ import (
 	"github.com/grafana/tempo/pkg/api"
 )
 
-type queryMCPStatusCmd struct {
+type mcpStatusCmd struct {
 	APIEndpoint string `arg:"" help:"tempo api endpoint"`
 	OrgID       string `help:"optional orgID"`
 }
 
-func (cmd *queryMCPStatusCmd) Run(_ *globalOptions) error {
+func (cmd *mcpStatusCmd) Run(_ *globalOptions) error {
 	mcpURL := buildMCPURL(cmd.APIEndpoint)
 
 	c, initResult, err := initMCPClient(mcpURL, cmd.OrgID)

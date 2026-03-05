@@ -8,12 +8,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-type queryMCPToolsCmd struct {
+type mcpToolsCmd struct {
 	APIEndpoint string `arg:"" help:"tempo api endpoint"`
 	OrgID       string `help:"optional orgID"`
 }
 
-func (cmd *queryMCPToolsCmd) Run(_ *globalOptions) error {
+func (cmd *mcpToolsCmd) Run(_ *globalOptions) error {
 	mcpURL := buildMCPURL(cmd.APIEndpoint)
 
 	c, _, err := initMCPClient(mcpURL, cmd.OrgID)
