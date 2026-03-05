@@ -307,6 +307,24 @@ func (c *Client) QueryTraceDiff(baseID, nextID string) (*tempopb.TraceByIDRespon
 	return m, nil
 }
 
+// GetLLMFormat sends a GET request with the LLM Accept header and returns the raw JSON body.
+func (c *Client) GetLLMFormat(url string) (string, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set(acceptHeader, api.HeaderAcceptLLM)
+
+	resp, body, err := c.doRequest(req)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return "", util.ErrTraceNotFound
+		}
+		return "", err
+	}
+	return string(body), nil
+}
+
 func (c *Client) QueryTraceWithRange(ctx context.Context, id string, start int64, end int64) (*tempopb.Trace, error) {
 	m := &tempopb.Trace{}
 	if start > end {

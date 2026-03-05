@@ -74,6 +74,7 @@ var cli struct {
 			SearchTagValues querySearchTagValuesCmd `cmd:"" help:"query Tempo search tag values"`
 			Search          querySearchCmd          `cmd:"" help:"query Tempo search"`
 			Metrics         metricsQueryCmd         `cmd:"" help:"query Tempo metrics query range"`
+			MCPStatus       queryMCPStatusCmd       `cmd:"" help:"check MCP server status and get agent config"`
 		} `cmd:""`
 		TraceID      queryBlocksCmd       `cmd:"" help:"query for a traceid directly from backend blocks"`
 		TraceSummary queryTraceSummaryCmd `cmd:"" help:"query summary for a traceid directly from backend blocks"`
