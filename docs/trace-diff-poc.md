@@ -193,7 +193,40 @@ Optional `--org-id` flag for multi-tenant setups:
 ./bin/tempo-cli mcp config http://localhost:3200 --windsurf
 ```
 
-### 7. Test via MCP
+### 7. View diff in the browser
+
+Open the diff viewer UI in your browser:
+
+```
+http://localhost:3200/api/v2/traces/diff/view?base=<traceID1>&next=<traceID2>
+```
+
+Or visit the landing page to enter trace IDs via a form:
+
+```
+http://localhost:3200/api/v2/traces/diff/view
+```
+
+Features:
+- Hexagon tree graph with overlaid base/next durations per operation
+- Color-coded nodes: red (base-only/removed), green (next-only/added), purple (both/overlaid), yellow (modified), gray (unchanged)
+- Pan and zoom (scroll wheel + click-drag)
+- Hover tooltips on nodes
+- Inline form to quickly diff different trace pairs
+
+### 8. Generate SVG via CLI
+
+```bash
+./bin/tempo-cli query api trace-diff-svg http://localhost:3200 <baseTraceID> <nextTraceID> -o diff.svg
+```
+
+**Summarize a diff** (top-K slowest added/removed operations, duration deltas):
+
+```bash
+./bin/tempo-cli query api trace-diff-summary http://localhost:3200 <baseTraceID> <nextTraceID> [--top 10]
+```
+
+### 9. Test via MCP
 
 The MCP server (when enabled via `query_frontend.mcp_server.enabled: true`) exposes a `diff-traces` tool.
 
@@ -203,7 +236,7 @@ The MCP server (when enabled via `query_frontend.mcp_server.enabled: true`) expo
 
 The MCP tool returns the diff in LLM format automatically. You can test it via any MCP client connected to `http://localhost:3200/api/mcp`.
 
-### 8. Run the test script
+### 10. Run the test script
 
 An automated test script covers the diff endpoint, LLM format, error handling, and CLI:
 
@@ -217,7 +250,7 @@ The script auto-discovers trace IDs from the running stack. You can also pass sp
 ./scripts/test-trace-diff.sh <baseTraceID> <nextTraceID>
 ```
 
-### 9. Run unit tests
+### 11. Run unit tests
 
 From the repo root:
 
@@ -227,7 +260,7 @@ go test ./pkg/model/trace/... -run TestDiff -v
 
 Expected: all 9 test cases pass.
 
-### 10. Tear down
+### 12. Tear down
 
 ```bash
 cd example/docker-compose/single-binary
@@ -255,10 +288,10 @@ docker logs single-binary-tempo-1 2>&1 | tail -20
 
 | File | Description |
 |---|---|
-| `pkg/api/http.go` | `PathTraceDiff` constant, `ParseTraceDiffRequest` function |
+| `pkg/api/http.go` | `PathTraceDiff`, `PathTraceDiffView` constants, `ParseTraceDiffRequest` function |
 | `pkg/model/trace/diff.go` | `DiffTraces` - core diff algorithm |
 | `pkg/model/trace/diff_test.go` | Unit tests for diff logic |
-| `modules/querier/http.go` | `TraceDiffHandler` HTTP handler, LLM format in response writer |
+| `modules/querier/http.go` | `TraceDiffHandler`, `TraceDiffViewHandler` HTTP handlers |
 | `modules/frontend/combiner/llm_marshaler.go` | Exported `MarshalResponseToLLM` for reuse |
 | `modules/frontend/frontend.go` | `TraceDiffHandler` field on `QueryFrontend` |
 | `modules/frontend/mcp.go` | `diff-traces` MCP tool registration |
@@ -270,5 +303,9 @@ docker logs single-binary-tempo-1 2>&1 | tail -20
 | `cmd/tempo-cli/cmd-query-mcp-status.go` | CLI `query api mcp-status` command + shared MCP helpers |
 | `cmd/tempo-cli/cmd-query-mcp-tools.go` | CLI `query api mcp-tools` command |
 | `cmd/tempo-cli/cmd-query-mcp-config.go` | CLI `query api mcp-config` command |
+| `cmd/tempo-cli/cmd-query-trace-diff-summary.go` | CLI `query api trace-diff-summary` command with `--top` flag |
+| `cmd/tempo-cli/cmd-query-trace-diff-svg.go` | CLI `query api trace-diff-svg` command with `-o` flag |
 | `cmd/tempo-cli/main.go` | CLI command registration |
+| `pkg/tracediffsvg/render.go` | Shared SVG tree rendering (hexagon graph layout) |
+| `pkg/tracediffsvg/html.go` | HTML wrapper with pan/zoom, tooltips, inline form |
 | `scripts/test-trace-diff.sh` | Automated end-to-end test script |

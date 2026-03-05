@@ -88,6 +88,7 @@ const (
 	PathSearchTagValuesV2 = "/api/v2/search/tag/" + MuxVarTagInPath + "/values"
 	PathSearchTagsV2      = "/api/v2/search/tags"
 	PathTraceDiff         = "/api/v2/traces/diff"
+	PathTraceDiffView     = "/api/v2/traces/diff/view"
 	PathTracesV2          = "/api/v2/traces/{traceID}"
 
 	QueryModeKey       = "mode"
