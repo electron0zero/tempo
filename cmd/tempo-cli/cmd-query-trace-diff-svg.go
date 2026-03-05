@@ -57,8 +57,8 @@ const (
 	hexR       = 32   // hexagon "radius" (center to vertex)
 	hexW       = 64   // hexagon width
 	hexH       = 56   // hexagon height
-	hSpacing   = 200  // horizontal spacing between leaf centers
-	vSpacing   = 160  // vertical spacing between levels
+	hSpacing   = 260  // horizontal spacing between leaf centers
+	vSpacing   = 140  // vertical spacing between levels
 	labelWidth = 180  // max label width below node
 	treePadTop = 100  // top padding for title + legend
 	treePadX   = 60   // left/right padding
@@ -167,9 +167,10 @@ func writeTreeSVG(path string, roots []*mergedNode, allNodes []*mergedNode, base
 
 	// Defs for arrow markers and drop shadow.
 	canvas.Def()
-	canvas.Marker("arrowhead", 10, 7, 10, 7, `orient="auto"`)
-	canvas.Path("M 0 0 L 10 3.5 L 0 7 z", "fill:#999")
-	canvas.MarkerEnd()
+	// Hand-write marker to use fractional refY for proper centering.
+	fmt.Fprintf(f, `<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#999"/>
+    </marker>`)
 	fmt.Fprintf(f, `<filter id="shadow" x="-10%%" y="-10%%" width="130%%" height="130%%">
       <feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.15"/>
     </filter>`)
@@ -178,11 +179,11 @@ func writeTreeSVG(path string, roots []*mergedNode, allNodes []*mergedNode, base
 	canvas.Style("text/css", `
 		.mono { font-family: 'SF Mono','Menlo','Monaco','Consolas',monospace; }
 		.title { font-size: 14px; font-weight: bold; fill: #1a1a2e; }
-		.op-name { font-size: 11px; font-weight: 600; fill: #1a1a2e; text-anchor: middle; }
-		.svc-name { font-size: 10px; fill: #666; text-anchor: middle; }
-		.dur-base { font-size: 10px; fill: #e74c3c; text-anchor: middle; font-weight: bold; }
-		.dur-next { font-size: 10px; fill: #27ae60; text-anchor: middle; font-weight: bold; }
-		.dur-delta { font-size: 10px; text-anchor: middle; font-weight: bold; }
+		.op-name { font-size: 11px; font-weight: 600; fill: #1a1a2e; }
+		.svc-name { font-size: 10px; fill: #666; }
+		.dur-base { font-size: 10px; fill: #e74c3c; font-weight: bold; }
+		.dur-next { font-size: 10px; fill: #27ae60; font-weight: bold; }
+		.dur-delta { font-size: 10px; font-weight: bold; }
 		.kind-label { font-size: 9px; text-anchor: middle; font-weight: bold; }
 		.legend-text { font-size: 11px; fill: #555; }
 		.edge { fill: none; stroke: #bbb; stroke-width: 1.5; }
@@ -200,9 +201,9 @@ func writeTreeSVG(path string, roots []*mergedNode, allNodes []*mergedNode, base
 	// Draw edges first (behind nodes).
 	for _, n := range allNodes {
 		for _, c := range n.Children {
-			// Curved edge from parent bottom to child top.
-			fromX, fromY := n.X, n.Y+hexR
-			toX, toY := c.X, c.Y-hexR
+			// Curved edge from parent bottom vertex to child top vertex.
+			fromX, fromY := n.X, n.Y+hexR+2
+			toX, toY := c.X, c.Y-hexR-4 // stop short for arrowhead
 			midY := (fromY + toY) / 2
 			pathD := fmt.Sprintf("M %d %d C %d %d %d %d %d %d",
 				fromX, fromY, fromX, midY, toX, midY, toX, toY)
@@ -242,7 +243,7 @@ func drawMiniHex(canvas *svg.SVG, cx, cy, r int, fill, stroke string) {
 	canvas.Polygon(xs, ys, fmt.Sprintf("fill:%s;stroke:%s;stroke-width:1.5", fill, stroke))
 }
 
-// drawHexNode draws a hexagon node with labels.
+// drawHexNode draws a hexagon node with labels to the right.
 func drawHexNode(canvas *svg.SVG, n *mergedNode) {
 	cx, cy := n.X, n.Y
 	fill, stroke := hexColors(n.Status)
@@ -256,37 +257,43 @@ func drawHexNode(canvas *svg.SVG, n *mergedNode) {
 	if len(kindLabel) > 8 {
 		kindLabel = kindLabel[:3]
 	}
-	canvas.Text(cx, cy+4, kindLabel, `class="mono kind-label"`, fmt.Sprintf(`fill="%s"`, kindTextColor(n.Status)))
+	canvas.Text(cx, cy+4, kindLabel, `class="mono kind-label"`, fmt.Sprintf(`fill="%s"`, kindTextColor(n.Status)), `text-anchor="middle"`)
 
-	// Operation name below hexagon.
+	// Labels to the right of the hexagon.
+	lx := cx + hexR + 10
+	ly := cy - 18
+
+	// Operation name.
 	opLabel := n.Name
-	if len(opLabel) > 24 {
-		opLabel = opLabel[:21] + "..."
+	if len(opLabel) > 30 {
+		opLabel = opLabel[:27] + "..."
 	}
-	canvas.Text(cx, cy+hexR+16, escapeXML(opLabel), `class="mono op-name"`)
+	canvas.Text(lx, ly, escapeXML(opLabel), `class="mono op-name"`)
+	ly += 14
 
 	// Service name.
 	if n.Service != "" {
 		svcLabel := n.Service
-		if len(svcLabel) > 24 {
-			svcLabel = svcLabel[:21] + "..."
+		if len(svcLabel) > 30 {
+			svcLabel = svcLabel[:27] + "..."
 		}
-		canvas.Text(cx, cy+hexR+30, escapeXML(svcLabel), `class="mono svc-name"`)
+		canvas.Text(lx, ly, escapeXML(svcLabel), `class="mono svc-name"`)
+		ly += 14
 	}
 
 	// Duration labels.
-	durY := cy + hexR + 44
 	if n.BaseDur > 0 && n.NextDur > 0 {
-		// Both: show base / next / delta
-		canvas.Text(cx, durY, fmt.Sprintf("%.1fms", n.BaseDur), `class="mono dur-base"`)
-		canvas.Text(cx, durY+14, fmt.Sprintf("%.1fms", n.NextDur), `class="mono dur-next"`)
+		canvas.Text(lx, ly, fmt.Sprintf("base: %.1fms", n.BaseDur), `class="mono dur-base"`)
+		ly += 13
+		canvas.Text(lx, ly, fmt.Sprintf("next: %.1fms", n.NextDur), `class="mono dur-next"`)
+		ly += 13
 		delta := n.NextDur - n.BaseDur
 		deltaStr, deltaColor := formatDelta(delta)
-		canvas.Text(cx, durY+28, deltaStr, `class="mono dur-delta"`, fmt.Sprintf(`fill="%s"`, deltaColor))
+		canvas.Text(lx, ly, deltaStr, `class="mono dur-delta"`, fmt.Sprintf(`fill="%s"`, deltaColor))
 	} else if n.BaseDur > 0 {
-		canvas.Text(cx, durY, fmt.Sprintf("%.1fms", n.BaseDur), `class="mono dur-base"`)
+		canvas.Text(lx, ly, fmt.Sprintf("base: %.1fms", n.BaseDur), `class="mono dur-base"`)
 	} else if n.NextDur > 0 {
-		canvas.Text(cx, durY, fmt.Sprintf("%.1fms", n.NextDur), `class="mono dur-next"`)
+		canvas.Text(lx, ly, fmt.Sprintf("next: %.1fms", n.NextDur), `class="mono dur-next"`)
 	}
 }
 
