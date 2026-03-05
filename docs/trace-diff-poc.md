@@ -167,26 +167,30 @@ Optional `--org-id` flag for multi-tenant setups:
 ./bin/tempo-cli query api trace-diff --org-id=my-tenant http://localhost:3200 <baseTraceID> <nextTraceID>
 ```
 
-### 6. Check MCP server status
+### 6. MCP commands
 
-Verify the MCP server is running and list available tools:
+**Check MCP server health:**
 
 ```bash
 ./bin/tempo-cli query api mcp-status http://localhost:3200
-./bin/tempo-cli query api mcp-status http://localhost:3200 --list-tools
 ```
 
-Get ready-to-use agent config snippets:
+**List available MCP tools:**
 
 ```bash
-# Claude Code (~/.claude/settings.json)
-./bin/tempo-cli query api mcp-status http://localhost:3200 --claude
+./bin/tempo-cli query api mcp-tools http://localhost:3200
+```
 
-# Cursor (.cursor/mcp.json)
-./bin/tempo-cli query api mcp-status http://localhost:3200 --cursor
+**Get agent config snippets** (prints all agents by default, or filter with flags):
 
-# Windsurf (~/.codeium/windsurf/mcp_config.json)
-./bin/tempo-cli query api mcp-status http://localhost:3200 --windsurf
+```bash
+# All agents
+./bin/tempo-cli query api mcp-config http://localhost:3200
+
+# Specific agent
+./bin/tempo-cli query api mcp-config http://localhost:3200 --claude
+./bin/tempo-cli query api mcp-config http://localhost:3200 --cursor
+./bin/tempo-cli query api mcp-config http://localhost:3200 --windsurf
 ```
 
 ### 7. Test via MCP
@@ -263,6 +267,8 @@ docker logs single-binary-tempo-1 2>&1 | tail -20
 | `pkg/httpclient/client.go` | `QueryTraceDiff` and `GetLLMFormat` HTTP client methods |
 | `cmd/tempo-cli/cmd-query-trace-diff.go` | CLI `query api trace-diff` command with `--llm` flag |
 | `cmd/tempo-cli/cmd-query-trace-id.go` | Added `--llm` flag to `query api trace-id` |
-| `cmd/tempo-cli/cmd-query-mcp-status.go` | CLI `query api mcp-status` command |
+| `cmd/tempo-cli/cmd-query-mcp-status.go` | CLI `query api mcp-status` command + shared MCP helpers |
+| `cmd/tempo-cli/cmd-query-mcp-tools.go` | CLI `query api mcp-tools` command |
+| `cmd/tempo-cli/cmd-query-mcp-config.go` | CLI `query api mcp-config` command |
 | `cmd/tempo-cli/main.go` | CLI command registration |
 | `scripts/test-trace-diff.sh` | Automated end-to-end test script |
