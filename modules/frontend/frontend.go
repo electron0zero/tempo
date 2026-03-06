@@ -47,7 +47,7 @@ type (
 )
 
 type QueryFrontend struct {
-	TraceByIDHandler, TraceByIDHandlerV2, SearchHandler                                        http.Handler
+	TraceByIDHandler, TraceByIDHandlerV2, TraceDiffHandler, SearchHandler                        http.Handler
 	SearchTagsHandler, SearchTagsV2Handler, SearchTagsValuesHandler, SearchTagsValuesV2Handler http.Handler
 	MetricsQueryInstantHandler, MetricsQueryRangeHandler                                       http.Handler
 	MCPHandler                                                                                 http.Handler

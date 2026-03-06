@@ -14,12 +14,22 @@ type queryTraceIDCmd struct {
 	TraceID     string `arg:"" help:"trace ID to retrieve"`
 
 	V1    bool   `name:"v1" help:"Use v1 API /api/traces endpoint"`
+	LLM   bool   `name:"llm" help:"return response in LLM format (simplified JSON)"`
 	OrgID string `help:"optional orgID"`
 }
 
 func (cmd *queryTraceIDCmd) Run(_ *globalOptions) error {
 	client := httpclient.New(cmd.APIEndpoint, cmd.OrgID)
 	// util.QueryTrace will only add orgID header if len(orgID) > 0
+
+	if cmd.LLM {
+		body, err := client.GetLLMFormat(cmd.APIEndpoint + "/api/v2/traces/" + cmd.TraceID)
+		if err != nil {
+			return err
+		}
+		fmt.Println(body)
+		return nil
+	}
 
 	// use v1 API if specified, we default to v2
 	if cmd.V1 {

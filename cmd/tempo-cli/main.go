@@ -69,6 +69,7 @@ var cli struct {
 	Query struct {
 		API struct {
 			TraceID         queryTraceIDCmd         `cmd:"" help:"query Tempo by trace ID"`
+			TraceDiff queryTraceDiffCmd `cmd:"" help:"diff two traces by ID"`
 			SearchTags      querySearchTagsCmd      `cmd:"" help:"query Tempo search tags"`
 			SearchTagValues querySearchTagValuesCmd `cmd:"" help:"query Tempo search tag values"`
 			Search          querySearchCmd          `cmd:"" help:"query Tempo search"`
@@ -96,6 +97,12 @@ var cli struct {
 	Suggest struct {
 		Columns suggestColumnsCmd `cmd:"" help:"Suggest columns for a tenant"`
 	} `cmd:""`
+
+	MCP struct {
+		Status mcpStatusCmd `cmd:"" help:"check MCP server health"`
+		Tools  mcpToolsCmd  `cmd:"" help:"list available MCP tools"`
+		Config mcpConfigCmd `cmd:"" help:"print MCP config for AI agents"`
+	} `cmd:"" help:"MCP server operations"`
 }
 
 func main() {

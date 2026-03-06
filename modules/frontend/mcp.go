@@ -34,6 +34,7 @@ const (
 	toolGetTrace              = "get-trace"
 	toolGetAttributeNames     = "get-attribute-names"
 	toolGetAttributeValues    = "get-attribute-values"
+	toolDiffTraces            = "diff-traces"
 	toolDocsTraceQL           = "docs-traceql"
 )
 
@@ -282,6 +283,19 @@ func (s *MCPServer) setupTools() {
 	)
 
 	s.mcpServer.AddTool(attributeValuesTool, s.handleGetAttributeValues)
+
+	diffTracesTool := newReadOnlyTool(toolDiffTraces,
+		mcp.WithDescription("Compare two traces by ID and return a diff showing added, removed, unchanged, and modified spans. Each span in the result has a tempo.diff.status attribute."),
+		mcp.WithString("base_trace_id",
+			mcp.Required(),
+			mcp.Description("Base trace ID to compare from"),
+		),
+		mcp.WithString("next_trace_id",
+			mcp.Required(),
+			mcp.Description("Next trace ID to compare to"),
+		),
+	)
+	s.mcpServer.AddTool(diffTracesTool, s.handleDiffTraces)
 
 	// docs tools - these are defined as tools as well as resources b/c claude code never asks for resources but it will nicely
 	// request the content from these docs tools.

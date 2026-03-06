@@ -87,6 +87,9 @@ const (
 
 	PathSearchTagValuesV2 = "/api/v2/search/tag/" + MuxVarTagInPath + "/values"
 	PathSearchTagsV2      = "/api/v2/search/tags"
+	PathTraceDiff          = "/api/v2/traces/diff"
+	PathTraceDiffView      = "/api/v2/traces/diff/view"
+	PathTraceDiffWaterfall = "/api/v2/traces/diff/waterfall"
 	PathTracesV2          = "/api/v2/traces/{traceID}"
 
 	QueryModeKey       = "mode"
@@ -149,6 +152,31 @@ func ParseTraceID(r *http.Request) ([]byte, error) {
 	}
 
 	return byteID, nil
+}
+
+// ParseTraceDiffRequest extracts base and next trace IDs from query parameters.
+func ParseTraceDiffRequest(r *http.Request) (baseID []byte, nextID []byte, err error) {
+	vals := r.URL.Query()
+
+	baseStr := vals.Get("base")
+	if baseStr == "" {
+		return nil, nil, fmt.Errorf("missing required query parameter: base")
+	}
+	nextStr := vals.Get("next")
+	if nextStr == "" {
+		return nil, nil, fmt.Errorf("missing required query parameter: next")
+	}
+
+	baseID, err = util.HexStringToTraceID(baseStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid base trace ID: %w", err)
+	}
+	nextID, err = util.HexStringToTraceID(nextStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid next trace ID: %w", err)
+	}
+
+	return baseID, nextID, nil
 }
 
 // ParseSearchRequest takes an http.Request and decodes query params to create a tempopb.SearchRequest

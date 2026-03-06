@@ -14,9 +14,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/grafana/tempo/modules/frontend/combiner"
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/model/trace"
 	"github.com/grafana/tempo/pkg/tempopb"
+	"github.com/grafana/tempo/pkg/tracediffsvg"
+	"github.com/grafana/tempo/tempodb"
 )
 
 const (
@@ -126,6 +129,72 @@ func (q *Querier) TraceByIDHandlerV2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeFormattedContentForRequest(w, r, resp, span)
+}
+
+func (q *Querier) TraceDiffHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.TraceByID.QueryTimeout))
+	defer cancel()
+
+	ctx, span := tracer.Start(ctx, "Querier.TraceDiffHandler")
+	defer span.End()
+
+	baseID, nextID, err := api.ParseTraceDiffRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	makeReq := func(traceID []byte) *tempopb.TraceByIDRequest {
+		return &tempopb.TraceByIDRequest{
+			TraceID:           traceID,
+			BlockStart:        tempodb.BlockIDMin,
+			BlockEnd:          tempodb.BlockIDMax,
+			QueryMode:         QueryModeAll,
+			AllowPartialTrace: true,
+		}
+	}
+
+	// Fetch both traces. Sequential is fine for a POC.
+	baseResp, err := q.FindTraceByID(ctx, makeReq(baseID), 0, 0)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	nextResp, err := q.FindTraceByID(ctx, makeReq(nextID), 0, 0)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	diffTrace := trace.DiffTraces(baseResp.Trace, nextResp.Trace)
+
+	resp := &tempopb.TraceByIDResponse{
+		Trace:   diffTrace,
+		Metrics: &tempopb.TraceByIDMetrics{},
+	}
+
+	writeFormattedContentForRequest(w, r, resp, span)
+}
+
+func (q *Querier) TraceDiffViewHandler(w http.ResponseWriter, r *http.Request) {
+	baseID := r.URL.Query().Get("base")
+	nextID := r.URL.Query().Get("next")
+	minDelta := r.URL.Query().Get("minDelta")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tracediffsvg.RenderViewPage(w, baseID, nextID, minDelta); err != nil {
+		http.Error(w, "failed to render page: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (q *Querier) TraceDiffWaterfallHandler(w http.ResponseWriter, r *http.Request) {
+	baseID := r.URL.Query().Get("base")
+	nextID := r.URL.Query().Get("next")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tracediffsvg.RenderWaterfallPage(w, baseID, nextID); err != nil {
+		http.Error(w, "failed to render page: "+err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (q *Querier) SearchHandler(w http.ResponseWriter, r *http.Request) {
@@ -433,6 +502,28 @@ func writeFormattedContentForRequest(w http.ResponseWriter, req *http.Request, m
 		}
 		if span != nil {
 			span.SetAttributes(attribute.String("contentType", api.HeaderAcceptProtobuf))
+		}
+
+	case api.HeaderAcceptLLM:
+		contentType := api.HeaderAcceptLLM + "+json"
+		body, err := combiner.MarshalResponseToLLM(m)
+		if err != nil {
+			// fallback to JSON for unsupported types
+			w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
+			err = new(jsonpb.Marshaler).Marshal(w, m)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		w.Header().Set(api.HeaderContentType, contentType)
+		_, err = fmt.Fprint(w, body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if span != nil {
+			span.SetAttributes(attribute.String("contentType", contentType))
 		}
 
 	default:

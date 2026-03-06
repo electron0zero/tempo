@@ -414,6 +414,17 @@ func (t *App) initQuerier() (services.Service, error) {
 	tracesHandler := middleware.Wrap(http.HandlerFunc(t.querier.TraceByIDHandler))
 	t.Server.HTTPRouter().Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTraces)), tracesHandler)
 
+	// diff sub-views must be registered before diff to avoid mux capture
+	traceDiffWaterfallHandler := middleware.Wrap(http.HandlerFunc(t.querier.TraceDiffWaterfallHandler))
+	t.Server.HTTPRouter().Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTraceDiffWaterfall)), traceDiffWaterfallHandler)
+
+	traceDiffViewHandler := middleware.Wrap(http.HandlerFunc(t.querier.TraceDiffViewHandler))
+	t.Server.HTTPRouter().Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTraceDiffView)), traceDiffViewHandler)
+
+	// diff must be registered before {traceID} to avoid mux capture
+	traceDiffHandler := middleware.Wrap(http.HandlerFunc(t.querier.TraceDiffHandler))
+	t.Server.HTTPRouter().Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTraceDiff)), traceDiffHandler)
+
 	tracesHandlerV2 := middleware.Wrap(http.HandlerFunc(t.querier.TraceByIDHandlerV2))
 	t.Server.HTTPRouter().Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTracesV2)), tracesHandlerV2)
 
@@ -475,6 +486,35 @@ func (t *App) initQueryFrontend() (services.Service, error) {
 
 	// http trace by id endpoint
 	t.Server.HTTPRouter().Handle(addHTTPAPIPrefix(&t.cfg, api.PathTraces), base.Wrap(queryFrontend.TraceByIDHandler))
+	// diff sub-views must be registered before diff to avoid mux capture
+	traceDiffWaterfallHTTPHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if t.querier == nil {
+			http.Error(w, "querier not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		t.querier.TraceDiffWaterfallHandler(w, r)
+	})
+	t.Server.HTTPRouter().Handle(addHTTPAPIPrefix(&t.cfg, api.PathTraceDiffWaterfall), base.Wrap(traceDiffWaterfallHTTPHandler))
+
+	traceDiffViewHTTPHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if t.querier == nil {
+			http.Error(w, "querier not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		t.querier.TraceDiffViewHandler(w, r)
+	})
+	t.Server.HTTPRouter().Handle(addHTTPAPIPrefix(&t.cfg, api.PathTraceDiffView), base.Wrap(traceDiffViewHTTPHandler))
+
+	// diff must be registered before {traceID} to avoid mux capture
+	traceDiffHTTPHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if t.querier == nil {
+			http.Error(w, "querier not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		t.querier.TraceDiffHandler(w, r)
+	})
+	queryFrontend.TraceDiffHandler = traceDiffHTTPHandler
+	t.Server.HTTPRouter().Handle(addHTTPAPIPrefix(&t.cfg, api.PathTraceDiff), base.Wrap(traceDiffHTTPHandler))
 	t.Server.HTTPRouter().Handle(addHTTPAPIPrefix(&t.cfg, api.PathTracesV2), base.Wrap(queryFrontend.TraceByIDHandlerV2))
 
 	// http search endpoints
