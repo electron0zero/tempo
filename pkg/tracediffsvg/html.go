@@ -121,7 +121,7 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
   <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">-</button>
   <button class="zoom-btn" onclick="zoomReset()" title="Fit to screen">Fit</button>
-  <span class="info">scroll to zoom, drag to pan</span>
+  <span class="info">scroll to zoom, drag to pan | <a href="/api/v2/traces/diff/waterfall{{if and .BaseID .NextID}}?base={{.BaseID}}&next={{.NextID}}{{end}}" style="color:#7aa2f7">waterfall view</a></span>
 </div>
 
 <div class="legend-bar">
@@ -190,11 +190,22 @@ function handleSubmit(e) {
 function zoomIn() { svgEl.transition().duration(300).call(zoomBehavior.scaleBy, 1.4); }
 function zoomOut() { svgEl.transition().duration(300).call(zoomBehavior.scaleBy, 0.7); }
 function zoomReset() {
-  // Fit content to viewport
   const bbox = gRoot.node().getBBox();
   if (!bbox.width) return;
   const vw = window.innerWidth, vh = window.innerHeight - 74;
-  const scale = Math.min(vw / (bbox.width + 120), vh / (bbox.height + 120), 1.5);
+  // Fit width, clamp scale so content stays readable
+  const scaleW = vw / (bbox.width + 120);
+  const scaleH = vh / (bbox.height + 120);
+  const scale = Math.min(scaleW, scaleH, 1.5);
+  // If content is very tall, fit width only and start at top
+  if (scaleH < 0.15) {
+    const fitW = Math.min(scaleW, 1.0);
+    const tx = (vw - bbox.width * fitW) / 2 - bbox.x * fitW;
+    const ty = -bbox.y * fitW + 10;
+    svgEl.transition().duration(500).call(zoomBehavior.transform,
+      d3.zoomIdentity.translate(tx, ty).scale(fitW));
+    return;
+  }
   const tx = (vw - bbox.width * scale) / 2 - bbox.x * scale;
   const ty = (vh - bbox.height * scale) / 2 - bbox.y * scale + 22;
   svgEl.transition().duration(500).call(zoomBehavior.transform,

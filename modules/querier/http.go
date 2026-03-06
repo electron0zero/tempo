@@ -187,6 +187,16 @@ func (q *Querier) TraceDiffViewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (q *Querier) TraceDiffWaterfallHandler(w http.ResponseWriter, r *http.Request) {
+	baseID := r.URL.Query().Get("base")
+	nextID := r.URL.Query().Get("next")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tracediffsvg.RenderWaterfallPage(w, baseID, nextID); err != nil {
+		http.Error(w, "failed to render page: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func (q *Querier) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	isSearchBlock := api.IsSearchBlock(r)
 
