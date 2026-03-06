@@ -179,9 +179,10 @@ func (q *Querier) TraceDiffHandler(w http.ResponseWriter, r *http.Request) {
 func (q *Querier) TraceDiffViewHandler(w http.ResponseWriter, r *http.Request) {
 	baseID := r.URL.Query().Get("base")
 	nextID := r.URL.Query().Get("next")
+	minDelta := r.URL.Query().Get("minDelta")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tracediffsvg.RenderViewPage(w, baseID, nextID); err != nil {
+	if err := tracediffsvg.RenderViewPage(w, baseID, nextID, minDelta); err != nil {
 		http.Error(w, "failed to render page: "+err.Error(), http.StatusInternalServerError)
 	}
 }

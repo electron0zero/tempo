@@ -42,12 +42,28 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .toolbar .zoom-btn:hover { background: #3a3b46; color: #e0e0e0; }
   .toolbar .info { margin-left: auto; color: #555; font-size: 10px; }
 
-  #canvas { width: 100%; height: calc(100vh - 44px); margin-top: 44px; }
+  .legend-bar {
+    position: fixed; top: 44px; left: 0; right: 0; z-index: 99;
+    background: #16161e; padding: 6px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    border-bottom: 1px solid #2a2b36;
+    font-size: 10px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; color: #565f89; }
+  .legend-hex-svg { display: inline-block; width: 18px; height: 18px; vertical-align: middle; }
+  .legend-sep { width: 1px; height: 16px; background: #2a2b36; }
+
+  #canvas { width: 100%; height: calc(100vh - 74px); margin-top: 74px; }
 
   .edge { fill: none; stroke: #3a3b46; stroke-width: 1.5; }
   .edge-arrow { fill: #3a3b46; }
   .hex { stroke-width: 2; cursor: pointer; transition: filter 0.15s; }
   .hex:hover { filter: brightness(1.3); }
+  .arrow-badge { font-size: 14px; font-weight: 900; text-anchor: middle; }
+  .arrow-slower { fill: #f7768e; }
+  .arrow-faster { fill: #9ece6a; }
+  .node-group.dimmed { opacity: 0.25; }
+  .edge.dimmed { opacity: 0.12; }
   .node-label { font-size: 11px; font-weight: 600; fill: #c0caf5; }
   .node-svc { font-size: 10px; fill: #565f89; }
   .node-kind { font-size: 8px; font-weight: 700; text-anchor: middle; }
@@ -57,8 +73,6 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .dur-delta.delta-pos { fill: #f7768e; }
   .dur-delta.delta-neg { fill: #9ece6a; }
 
-  .legend { font-size: 10px; fill: #565f89; }
-  .legend-hex { stroke-width: 1.5; }
 
   /* Loading / error overlays */
   .overlay {
@@ -99,12 +113,27 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
     <button type="submit">Diff</button>
   </form>
   <div class="sep"></div>
+  <label>min delta</label>
+  <input id="inp-delta" type="number" value="{{.MinDelta}}" min="0" step="1" placeholder="ms"
+    style="width:70px" oninput="applyHighlight()" title="highlight nodes where |delta| >= this value"/>
+  <label>ms</label>
+  <div class="sep"></div>
   <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
   <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">-</button>
   <button class="zoom-btn" onclick="zoomReset()" title="Fit to screen">Fit</button>
   <span class="info">scroll to zoom, drag to pan</span>
 </div>
 
+<div class="legend-bar">
+  <span class="legend-item"><svg class="legend-hex-svg" viewBox="-10 -10 20 20"><polygon points="8.7,5 0,10 -8.7,5 -8.7,-5 0,-10 8.7,-5" fill="#2d1f1f" stroke="#f7768e" stroke-width="2"/></svg>base-only (removed)</span>
+  <span class="legend-item"><svg class="legend-hex-svg" viewBox="-10 -10 20 20"><polygon points="8.7,5 0,10 -8.7,5 -8.7,-5 0,-10 8.7,-5" fill="#1f2d1f" stroke="#9ece6a" stroke-width="2"/></svg>next-only (added)</span>
+  <span class="legend-item"><svg class="legend-hex-svg" viewBox="-10 -10 20 20"><polygon points="8.7,5 0,10 -8.7,5 -8.7,-5 0,-10 8.7,-5" fill="#1f1f2d" stroke="#7aa2f7" stroke-width="2"/></svg>both (overlaid)</span>
+  <span class="legend-item"><svg class="legend-hex-svg" viewBox="-10 -10 20 20"><polygon points="8.7,5 0,10 -8.7,5 -8.7,-5 0,-10 8.7,-5" fill="#2d2a1f" stroke="#e0af68" stroke-width="2"/></svg>modified</span>
+  <span class="legend-item"><svg class="legend-hex-svg" viewBox="-10 -10 20 20"><polygon points="8.7,5 0,10 -8.7,5 -8.7,-5 0,-10 8.7,-5" fill="#1f1f1f" stroke="#565f89" stroke-width="2"/></svg>unchanged</span>
+  <span class="legend-sep"></span>
+  <span class="legend-item"><span style="color:#f7768e;font-size:14px;font-weight:900">&#9660;</span> got slower</span>
+  <span class="legend-item"><span style="color:#9ece6a;font-size:14px;font-weight:900">&#9650;</span> got faster</span>
+</div>
 <svg id="canvas"></svg>
 <div class="tooltip" id="tooltip"></div>
 <div class="overlay" id="overlay"></div>
@@ -127,7 +156,7 @@ const STATUS_COLORS = {
   'unchanged': { fill: '#1f1f1f', stroke: '#565f89', kind: '#565f89' },
 };
 
-let svgEl, gRoot, zoomBehavior;
+let svgEl, gRoot, zoomBehavior, lastRenderedNodes = [], lastRenderedEdges = [];
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -150,7 +179,10 @@ function handleSubmit(e) {
   const base = document.getElementById('inp-base').value.trim();
   const next = document.getElementById('inp-next').value.trim();
   if (!base || !next) return false;
-  history.pushState(null, '', '?base=' + base + '&next=' + next);
+  const delta = document.getElementById('inp-delta').value;
+  let qs = '?base=' + base + '&next=' + next;
+  if (delta && parseFloat(delta) > 0) qs += '&minDelta=' + delta;
+  history.pushState(null, '', qs);
   fetchAndRender(base, next);
   return false;
 }
@@ -161,7 +193,7 @@ function zoomReset() {
   // Fit content to viewport
   const bbox = gRoot.node().getBBox();
   if (!bbox.width) return;
-  const vw = window.innerWidth, vh = window.innerHeight - 44;
+  const vw = window.innerWidth, vh = window.innerHeight - 74;
   const scale = Math.min(vw / (bbox.width + 120), vh / (bbox.height + 120), 1.5);
   const tx = (vw - bbox.width * scale) / 2 - bbox.x * scale;
   const ty = (vh - bbox.height * scale) / 2 - bbox.y * scale + 22;
@@ -185,6 +217,7 @@ async function fetchAndRender(baseID, nextID) {
     const data = await resp.json();
     overlay.style.display = 'none';
     renderTree(data, baseID, nextID);
+    applyHighlight();
     setTimeout(zoomReset, 50);
   } catch (err) {
     overlay.className = 'overlay error';
@@ -332,18 +365,17 @@ function renderTree(data, baseID, nextID) {
   const roots = buildMergedTree(data);
   const nodes = layoutTree(roots);
 
-  // Draw legend
-  drawLegend(gRoot);
-
-  // Draw edges
+  // Draw edges and store references
+  lastRenderedEdges = [];
   for (const n of nodes) {
     for (const c of n.children) {
       const midY = (n.y + HEX_R + c.y - HEX_R) / 2;
-      gRoot.append('path')
+      const edgeEl = gRoot.append('path')
         .attr('class', 'edge')
         .attr('d', 'M' + n.x + ',' + (n.y + HEX_R + 2) +
               ' C' + n.x + ',' + midY + ' ' + c.x + ',' + midY + ' ' + c.x + ',' + (c.y - HEX_R - 6))
         .attr('marker-end', 'url(#arrow)');
+      lastRenderedEdges.push({ el: edgeEl, parent: n, child: c });
     }
   }
 
@@ -357,12 +389,20 @@ function renderTree(data, baseID, nextID) {
   // Draw nodes
   const tooltip = document.getElementById('tooltip');
 
+  lastRenderedNodes = nodes;
+
   for (const n of nodes) {
-    const g = gRoot.append('g').attr('transform', 'translate(' + n.x + ',' + n.y + ')');
+    const absDelta = (n.baseDur > 0 && n.nextDur > 0) ? Math.abs(n.nextDur - n.baseDur) : 0;
+    const g = gRoot.append('g')
+      .attr('transform', 'translate(' + n.x + ',' + n.y + ')')
+      .attr('class', 'node-group')
+      .attr('data-abs-delta', absDelta.toFixed(2));
+    n._el = g;
     const colors = STATUS_COLORS[n.status] || STATUS_COLORS['unchanged'];
 
     // Hexagon
     const pts = hexPoints(0, 0, HEX_R);
+    const delta = (n.baseDur > 0 && n.nextDur > 0) ? n.nextDur - n.baseDur : 0;
     g.append('polygon')
       .attr('points', pts)
       .attr('class', 'hex')
@@ -375,6 +415,21 @@ function renderTree(data, baseID, nextID) {
       .attr('class', 'node-kind')
       .attr('fill', colors.kind)
       .text(n.kind);
+
+    // Arrow badge for delta direction (positioned to the left of the hex)
+    if (delta > 0.5) {
+      g.append('text')
+        .attr('x', -(HEX_R + 10))
+        .attr('y', 5)
+        .attr('class', 'arrow-badge arrow-slower')
+        .text('\u25BC'); // down triangle = slower (red)
+    } else if (delta < -0.5) {
+      g.append('text')
+        .attr('x', -(HEX_R + 10))
+        .attr('y', 5)
+        .attr('class', 'arrow-badge arrow-faster')
+        .text('\u25B2'); // up triangle = faster (green)
+    }
 
     // Labels to the right
     const lx = HEX_R + 10;
@@ -435,29 +490,6 @@ function renderTree(data, baseID, nextID) {
   }
 }
 
-function drawLegend(g) {
-  const items = [
-    { status: 'base-only', label: 'base-only (removed)' },
-    { status: 'next-only', label: 'next-only (added)' },
-    { status: 'both', label: 'both (overlaid)' },
-    { status: 'modified', label: 'modified' },
-    { status: 'unchanged', label: 'unchanged' },
-  ];
-  let lx = PAD_X;
-  for (const it of items) {
-    const c = STATUS_COLORS[it.status];
-    g.append('polygon')
-      .attr('points', hexPoints(lx, 14, 8))
-      .attr('class', 'legend-hex')
-      .attr('fill', c.fill).attr('stroke', c.stroke);
-    g.append('text')
-      .attr('x', lx + 14).attr('y', 18)
-      .attr('class', 'legend')
-      .text(it.label);
-    lx += it.label.length * 7 + 36;
-  }
-}
-
 function hexPoints(cx, cy, r) {
   const pts = [];
   for (let i = 0; i < 6; i++) {
@@ -465,6 +497,41 @@ function hexPoints(cx, cy, r) {
     pts.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1));
   }
   return pts.join(' ');
+}
+
+// applyHighlight dims nodes below the delta threshold.
+// The glow (red=slower, green=faster) is always present on nodes with a delta.
+// minDelta controls the threshold: only nodes with |delta| >= |minDelta| stay visible.
+// If minDelta is positive, only slower nodes above the threshold are highlighted.
+// If minDelta is negative, only faster nodes above the threshold are highlighted.
+// If minDelta is 0, all nodes are visible with their default glows.
+function applyHighlight() {
+  const raw = parseFloat(document.getElementById('inp-delta').value);
+  const threshold = isNaN(raw) ? 0 : raw;
+
+  const params = new URLSearchParams(window.location.search);
+  if (threshold !== 0) params.set('minDelta', threshold);
+  else params.delete('minDelta');
+  history.replaceState(null, '', '?' + params.toString());
+
+  if (threshold === 0 || !lastRenderedNodes.length) {
+    d3.selectAll('.node-group').classed('dimmed', false);
+    d3.selectAll('.edge').classed('dimmed', false);
+    return;
+  }
+
+  const visible = new Set();
+  for (const n of lastRenderedNodes) {
+    const delta = (n.baseDur > 0 && n.nextDur > 0) ? n.nextDur - n.baseDur : 0;
+    const passes = Math.abs(delta) >= threshold;
+    n._el.classed('dimmed', !passes);
+    if (passes) visible.add(n);
+  }
+
+  for (const e of lastRenderedEdges) {
+    const show = visible.has(e.parent) || visible.has(e.child);
+    e.el.classed('dimmed', !show);
+  }
 }
 
 function esc(s) {
@@ -501,16 +568,20 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!DOCTYPE htm
 </body></html>`))
 
 type htmlData struct {
-	BaseID string
-	NextID string
+	BaseID   string
+	NextID   string
+	MinDelta string
 }
 
 // RenderViewPage writes the diff viewer HTML page.
 // If baseID and nextID are provided, it renders the app with those IDs pre-filled
 // and auto-fetches on load. Otherwise it renders the landing page.
-func RenderViewPage(w io.Writer, baseID, nextID string) error {
+func RenderViewPage(w io.Writer, baseID, nextID, minDelta string) error {
 	if baseID == "" || nextID == "" {
 		return landingTemplate.Execute(w, nil)
 	}
-	return htmlTemplate.Execute(w, htmlData{BaseID: baseID, NextID: nextID})
+	if minDelta == "" {
+		minDelta = "0"
+	}
+	return htmlTemplate.Execute(w, htmlData{BaseID: baseID, NextID: nextID, MinDelta: minDelta})
 }
