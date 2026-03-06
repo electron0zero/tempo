@@ -35,6 +35,12 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   }
   .toolbar button:hover { background: #89b4fa; }
   .toolbar .sep { width: 1px; height: 24px; background: #3a3b46; }
+  .toolbar .zoom-btn {
+    background: #2a2b36; color: #888; padding: 5px 10px; font-size: 13px;
+    border: 1px solid #3a3b46; border-radius: 4px; cursor: pointer;
+    font-family: inherit;
+  }
+  .toolbar .zoom-btn:hover { background: #3a3b46; color: #e0e0e0; }
   .toolbar .info { margin-left: auto; color: #555; font-size: 10px; }
   .toolbar .info a { color: #7aa2f7; }
 
@@ -50,7 +56,7 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .legend-sep { width: 1px; height: 16px; background: #2a2b36; }
 
   #canvas-wrap { overflow: auto; padding: 20px; min-height: 300px; }
-  #canvas { display: block; }
+  #canvas { display: block; transform-origin: 0 0; }
 
   .edge { fill: none; stroke: #3a3b46; stroke-width: 1.5; }
   .edge-arrow { fill: #3a3b46; }
@@ -111,6 +117,10 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   <input id="inp-delta" type="number" value="{{.MinDelta}}" min="0" step="1" placeholder="ms"
     style="width:70px" oninput="applyHighlight()" title="highlight nodes where |delta| >= this value"/>
   <label>ms</label>
+  <div class="sep"></div>
+  <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
+  <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">-</button>
+  <button class="zoom-btn" onclick="zoomReset()" title="Reset zoom">1:1</button>
   <span class="info"><a href="/api/v2/traces/diff/waterfall{{if and .BaseID .NextID}}?base={{.BaseID}}&next={{.NextID}}{{end}}">waterfall view</a></span>
 </div>
 
@@ -149,6 +159,7 @@ const STATUS_COLORS = {
 };
 
 let svgEl, lastRenderedNodes = [], lastRenderedEdges = [];
+let currentScale = 1;
 
 document.addEventListener('DOMContentLoaded', () => {
   svgEl = document.getElementById('canvas');
@@ -170,6 +181,13 @@ function handleSubmit(e) {
   fetchAndRender(base, next);
   return false;
 }
+
+function applyZoom() {
+  svgEl.style.transform = 'scale(' + currentScale + ')';
+}
+function zoomIn() { currentScale = Math.min(currentScale * 1.3, 4); applyZoom(); }
+function zoomOut() { currentScale = Math.max(currentScale / 1.3, 0.15); applyZoom(); }
+function zoomReset() { currentScale = 1; applyZoom(); }
 
 async function fetchAndRender(baseID, nextID) {
   const wrap = document.getElementById('canvas-wrap');
