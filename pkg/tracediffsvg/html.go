@@ -11,13 +11,12 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Trace Diff Viewer</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'SF Mono','Menlo','Monaco','Consolas',monospace; background: #0f1117; color: #e0e0e0; overflow: hidden; }
+  body { font-family: 'SF Mono','Menlo','Monaco','Consolas',monospace; background: #0f1117; color: #e0e0e0; }
 
   .toolbar {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    position: sticky; top: 0; z-index: 100;
     background: #1a1b26; padding: 10px 20px;
     display: flex; align-items: center; gap: 10px;
     border-bottom: 1px solid #2a2b36;
@@ -36,14 +35,11 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   }
   .toolbar button:hover { background: #89b4fa; }
   .toolbar .sep { width: 1px; height: 24px; background: #3a3b46; }
-  .toolbar .zoom-btn {
-    background: #2a2b36; color: #888; padding: 5px 10px; font-size: 13px; border: 1px solid #3a3b46;
-  }
-  .toolbar .zoom-btn:hover { background: #3a3b46; color: #e0e0e0; }
   .toolbar .info { margin-left: auto; color: #555; font-size: 10px; }
+  .toolbar .info a { color: #7aa2f7; }
 
   .legend-bar {
-    position: fixed; top: 44px; left: 0; right: 0; z-index: 99;
+    position: sticky; top: 44px; z-index: 99;
     background: #16161e; padding: 6px 20px;
     display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     border-bottom: 1px solid #2a2b36;
@@ -53,7 +49,8 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .legend-hex-svg { display: inline-block; width: 18px; height: 18px; vertical-align: middle; }
   .legend-sep { width: 1px; height: 16px; background: #2a2b36; }
 
-  #canvas { width: 100%; height: calc(100vh - 74px); margin-top: 74px; }
+  #canvas-wrap { overflow: auto; padding: 20px; min-height: 300px; }
+  #canvas { display: block; }
 
   .edge { fill: none; stroke: #3a3b46; stroke-width: 1.5; }
   .edge-arrow { fill: #3a3b46; }
@@ -73,18 +70,15 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .dur-delta.delta-pos { fill: #f7768e; }
   .dur-delta.delta-neg { fill: #9ece6a; }
 
-
-  /* Loading / error overlays */
   .overlay {
-    position: fixed; top: 44px; left: 0; right: 0; bottom: 0;
     display: flex; justify-content: center; align-items: center;
-    font-size: 14px; color: #888; z-index: 50;
+    min-height: 300px;
+    font-size: 14px; color: #888;
   }
   .overlay.error { color: #f7768e; }
-  .spinner { animation: spin 1s linear infinite; }
+  .spinner { animation: spin 1s linear infinite; display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Tooltip */
   .tooltip {
     position: fixed; z-index: 200; pointer-events: none;
     background: #1a1b26; color: #c0caf5; padding: 10px 14px;
@@ -117,11 +111,7 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   <input id="inp-delta" type="number" value="{{.MinDelta}}" min="0" step="1" placeholder="ms"
     style="width:70px" oninput="applyHighlight()" title="highlight nodes where |delta| >= this value"/>
   <label>ms</label>
-  <div class="sep"></div>
-  <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
-  <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">-</button>
-  <button class="zoom-btn" onclick="zoomReset()" title="Fit to screen">Fit</button>
-  <span class="info">scroll to zoom, drag to pan | <a href="/api/v2/traces/diff/waterfall{{if and .BaseID .NextID}}?base={{.BaseID}}&next={{.NextID}}{{end}}" style="color:#7aa2f7">waterfall view</a></span>
+  <span class="info"><a href="/api/v2/traces/diff/waterfall{{if and .BaseID .NextID}}?base={{.BaseID}}&next={{.NextID}}{{end}}">waterfall view</a></span>
 </div>
 
 <div class="legend-bar">
@@ -134,9 +124,11 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   <span class="legend-item"><span style="color:#f7768e;font-size:14px;font-weight:900">&#9660;</span> got slower</span>
   <span class="legend-item"><span style="color:#9ece6a;font-size:14px;font-weight:900">&#9650;</span> got faster</span>
 </div>
-<svg id="canvas"></svg>
+
+<div id="canvas-wrap">
+  <svg id="canvas"></svg>
+</div>
 <div class="tooltip" id="tooltip"></div>
-<div class="overlay" id="overlay"></div>
 
 <script>
 const DIFF_API = '/api/v2/traces/diff';
@@ -156,18 +148,10 @@ const STATUS_COLORS = {
   'unchanged': { fill: '#1f1f1f', stroke: '#565f89', kind: '#565f89' },
 };
 
-let svgEl, gRoot, zoomBehavior, lastRenderedNodes = [], lastRenderedEdges = [];
+let svgEl, lastRenderedNodes = [], lastRenderedEdges = [];
 
-// --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
-  svgEl = d3.select('#canvas');
-  gRoot = svgEl.append('g');
-
-  zoomBehavior = d3.zoom()
-    .scaleExtent([0.1, 6])
-    .on('zoom', (e) => gRoot.attr('transform', e.transform));
-  svgEl.call(zoomBehavior);
-
+  svgEl = document.getElementById('canvas');
   const params = new URLSearchParams(window.location.search);
   const base = params.get('base');
   const next = params.get('next');
@@ -187,36 +171,9 @@ function handleSubmit(e) {
   return false;
 }
 
-function zoomIn() { svgEl.transition().duration(300).call(zoomBehavior.scaleBy, 1.4); }
-function zoomOut() { svgEl.transition().duration(300).call(zoomBehavior.scaleBy, 0.7); }
-function zoomReset() {
-  const bbox = gRoot.node().getBBox();
-  if (!bbox.width) return;
-  const vw = window.innerWidth, vh = window.innerHeight - 74;
-  // Fit width, clamp scale so content stays readable
-  const scaleW = vw / (bbox.width + 120);
-  const scaleH = vh / (bbox.height + 120);
-  const scale = Math.min(scaleW, scaleH, 1.5);
-  // If content is very tall, fit width only and start at top
-  if (scaleH < 0.15) {
-    const fitW = Math.min(scaleW, 1.0);
-    const tx = (vw - bbox.width * fitW) / 2 - bbox.x * fitW;
-    const ty = -bbox.y * fitW + 10;
-    svgEl.transition().duration(500).call(zoomBehavior.transform,
-      d3.zoomIdentity.translate(tx, ty).scale(fitW));
-    return;
-  }
-  const tx = (vw - bbox.width * scale) / 2 - bbox.x * scale;
-  const ty = (vh - bbox.height * scale) / 2 - bbox.y * scale + 22;
-  svgEl.transition().duration(500).call(zoomBehavior.transform,
-    d3.zoomIdentity.translate(tx, ty).scale(scale));
-}
-
-// --- Data fetching ---
 async function fetchAndRender(baseID, nextID) {
-  const overlay = document.getElementById('overlay');
-  overlay.className = 'overlay';
-  overlay.innerHTML = '<span class="spinner">&#9881;</span>&nbsp; Loading traces...';
+  const wrap = document.getElementById('canvas-wrap');
+  wrap.innerHTML = '<div class="overlay"><span class="spinner">&#9881;</span>&nbsp; Loading traces...</div>';
 
   try {
     const url = DIFF_API + '?base=' + encodeURIComponent(baseID) + '&next=' + encodeURIComponent(nextID);
@@ -226,23 +183,21 @@ async function fetchAndRender(baseID, nextID) {
       throw new Error(resp.status + ': ' + body);
     }
     const data = await resp.json();
-    overlay.style.display = 'none';
+    // Re-create SVG element
+    wrap.innerHTML = '<svg id="canvas"></svg>';
+    svgEl = document.getElementById('canvas');
     renderTree(data, baseID, nextID);
     applyHighlight();
-    setTimeout(zoomReset, 50);
   } catch (err) {
-    overlay.className = 'overlay error';
-    overlay.textContent = 'Error: ' + err.message;
+    wrap.innerHTML = '<div class="overlay error">Error: ' + esc(err.message) + '</div>';
   }
 }
 
-// --- Tree building ---
 function shortKind(k) {
   return (k || '').replace('SPAN_KIND_', '');
 }
 
 function buildMergedTree(data) {
-  // Extract flat spans with diff status
   const spans = [];
   for (const svc of (data.trace?.services || [])) {
     for (const scope of (svc.scopes || [])) {
@@ -260,7 +215,6 @@ function buildMergedTree(data) {
     }
   }
 
-  // Split by status
   const base = spans.filter(s => s.status === 'removed' || s.status === 'unchanged' || s.status === 'modified');
   const next = spans.filter(s => s.status === 'added' || s.status === 'unchanged' || s.status === 'modified');
 
@@ -272,7 +226,6 @@ function buildMergedTree(data) {
       if (parent) parent.children.push(n);
       else roots.push(n);
     }
-    // Sort children by duration desc
     const sortNodes = (nodes) => {
       nodes.sort((a, b) => b.duration - a.duration);
       nodes.forEach(n => sortNodes(n.children));
@@ -285,7 +238,6 @@ function buildMergedTree(data) {
   const baseTree = buildTree(base);
   const nextTree = buildTree(next);
 
-  // Merge trees by matching name+kind at each level
   function matchKey(n) { return n.name + '\0' + n.kind; }
 
   function merge(baseNodes, nextNodes) {
@@ -323,7 +275,6 @@ function buildMergedTree(data) {
       result.push(node);
     }
 
-    // Next-only
     for (const nn of nextNodes) {
       const k = matchKey(nn);
       const nextList = nextByKey.get(k) || [];
@@ -346,7 +297,6 @@ function buildMergedTree(data) {
   return merge(baseTree, nextTree);
 }
 
-// --- Layout ---
 function layoutTree(roots) {
   let leafIdx = 0;
   function assign(node, depth) {
@@ -362,84 +312,107 @@ function layoutTree(roots) {
   }
   roots.forEach(r => assign(r, 0));
 
-  // Flatten
   const all = [];
   function collect(n) { all.push(n); n.children.forEach(collect); }
   roots.forEach(collect);
   return all;
 }
 
-// --- Rendering ---
 function renderTree(data, baseID, nextID) {
-  gRoot.selectAll('*').remove();
-
   const roots = buildMergedTree(data);
   const nodes = layoutTree(roots);
 
-  // Draw edges and store references
+  // Compute bounding box for SVG sizing
+  let maxX = 0, maxY = 0;
+  for (const n of nodes) {
+    // Account for hex + label text to the right (~200px)
+    maxX = Math.max(maxX, n.x + HEX_R + 200);
+    maxY = Math.max(maxY, n.y + HEX_R + 40);
+  }
+  svgEl.setAttribute('width', maxX);
+  svgEl.setAttribute('height', maxY);
+  svgEl.style.width = maxX + 'px';
+  svgEl.style.height = maxY + 'px';
+
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // Arrow marker def
+  const defs = document.createElementNS(NS, 'defs');
+  const marker = document.createElementNS(NS, 'marker');
+  marker.setAttribute('id', 'arrow');
+  marker.setAttribute('markerWidth', '10');
+  marker.setAttribute('markerHeight', '7');
+  marker.setAttribute('refX', '10');
+  marker.setAttribute('refY', '3.5');
+  marker.setAttribute('orient', 'auto');
+  const markerPath = document.createElementNS(NS, 'path');
+  markerPath.setAttribute('d', 'M0,0 L10,3.5 L0,7z');
+  markerPath.setAttribute('class', 'edge-arrow');
+  marker.appendChild(markerPath);
+  defs.appendChild(marker);
+  svgEl.appendChild(defs);
+
+  const tooltip = document.getElementById('tooltip');
+
+  // Draw edges
   lastRenderedEdges = [];
   for (const n of nodes) {
     for (const c of n.children) {
       const midY = (n.y + HEX_R + c.y - HEX_R) / 2;
-      const edgeEl = gRoot.append('path')
-        .attr('class', 'edge')
-        .attr('d', 'M' + n.x + ',' + (n.y + HEX_R + 2) +
-              ' C' + n.x + ',' + midY + ' ' + c.x + ',' + midY + ' ' + c.x + ',' + (c.y - HEX_R - 6))
-        .attr('marker-end', 'url(#arrow)');
-      lastRenderedEdges.push({ el: edgeEl, parent: n, child: c });
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('class', 'edge');
+      path.setAttribute('d', 'M' + n.x + ',' + (n.y + HEX_R + 2) +
+            ' C' + n.x + ',' + midY + ' ' + c.x + ',' + midY + ' ' + c.x + ',' + (c.y - HEX_R - 6));
+      path.setAttribute('marker-end', 'url(#arrow)');
+      svgEl.appendChild(path);
+      lastRenderedEdges.push({ el: path, parent: n, child: c });
     }
   }
 
-  // Arrow marker
-  const defs = gRoot.append('defs');
-  defs.append('marker')
-    .attr('id', 'arrow').attr('markerWidth', 10).attr('markerHeight', 7)
-    .attr('refX', 10).attr('refY', 3.5).attr('orient', 'auto')
-    .append('path').attr('d', 'M0,0 L10,3.5 L0,7z').attr('class', 'edge-arrow');
-
   // Draw nodes
-  const tooltip = document.getElementById('tooltip');
-
   lastRenderedNodes = nodes;
 
   for (const n of nodes) {
     const absDelta = (n.baseDur > 0 && n.nextDur > 0) ? Math.abs(n.nextDur - n.baseDur) : 0;
-    const g = gRoot.append('g')
-      .attr('transform', 'translate(' + n.x + ',' + n.y + ')')
-      .attr('class', 'node-group')
-      .attr('data-abs-delta', absDelta.toFixed(2));
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
+    g.setAttribute('class', 'node-group');
+    g.setAttribute('data-abs-delta', absDelta.toFixed(2));
     n._el = g;
     const colors = STATUS_COLORS[n.status] || STATUS_COLORS['unchanged'];
 
     // Hexagon
-    const pts = hexPoints(0, 0, HEX_R);
-    const delta = (n.baseDur > 0 && n.nextDur > 0) ? n.nextDur - n.baseDur : 0;
-    g.append('polygon')
-      .attr('points', pts)
-      .attr('class', 'hex')
-      .attr('fill', colors.fill)
-      .attr('stroke', colors.stroke);
+    const poly = document.createElementNS(NS, 'polygon');
+    poly.setAttribute('points', hexPoints(0, 0, HEX_R));
+    poly.setAttribute('class', 'hex');
+    poly.setAttribute('fill', colors.fill);
+    poly.setAttribute('stroke', colors.stroke);
+    g.appendChild(poly);
 
     // Kind inside hex
-    g.append('text')
-      .attr('y', 3)
-      .attr('class', 'node-kind')
-      .attr('fill', colors.kind)
-      .text(n.kind);
+    const kindText = document.createElementNS(NS, 'text');
+    kindText.setAttribute('y', '3');
+    kindText.setAttribute('class', 'node-kind');
+    kindText.setAttribute('fill', colors.kind);
+    kindText.textContent = n.kind;
+    g.appendChild(kindText);
 
-    // Arrow badge for delta direction (positioned to the left of the hex)
+    // Arrow badge for delta direction
+    const delta = (n.baseDur > 0 && n.nextDur > 0) ? n.nextDur - n.baseDur : 0;
     if (delta > 0.5) {
-      g.append('text')
-        .attr('x', -(HEX_R + 10))
-        .attr('y', 5)
-        .attr('class', 'arrow-badge arrow-slower')
-        .text('\u25BC'); // down triangle = slower (red)
+      const badge = document.createElementNS(NS, 'text');
+      badge.setAttribute('x', String(-(HEX_R + 10)));
+      badge.setAttribute('y', '5');
+      badge.setAttribute('class', 'arrow-badge arrow-slower');
+      badge.textContent = '\u25BC';
+      g.appendChild(badge);
     } else if (delta < -0.5) {
-      g.append('text')
-        .attr('x', -(HEX_R + 10))
-        .attr('y', 5)
-        .attr('class', 'arrow-badge arrow-faster')
-        .text('\u25B2'); // up triangle = faster (green)
+      const badge = document.createElementNS(NS, 'text');
+      badge.setAttribute('x', String(-(HEX_R + 10)));
+      badge.setAttribute('y', '5');
+      badge.setAttribute('class', 'arrow-badge arrow-faster');
+      badge.textContent = '\u25B2';
+      g.appendChild(badge);
     }
 
     // Labels to the right
@@ -448,36 +421,35 @@ function renderTree(data, baseID, nextID) {
 
     let label = n.name;
     if (label.length > 28) label = label.slice(0, 25) + '...';
-    g.append('text').attr('x', lx).attr('y', ly).attr('class', 'node-label').text(label);
+    appendText(g, lx, ly, 'node-label', null, label);
     ly += 14;
 
     if (n.service) {
       let svc = n.service;
       if (svc.length > 28) svc = svc.slice(0, 25) + '...';
-      g.append('text').attr('x', lx).attr('y', ly).attr('class', 'node-svc').text(svc);
+      appendText(g, lx, ly, 'node-svc', null, svc);
       ly += 14;
     }
 
     if (n.baseDur > 0) {
-      g.append('text').attr('x', lx).attr('y', ly).attr('class', 'dur-base').text('base: ' + n.baseDur.toFixed(1) + 'ms');
+      appendText(g, lx, ly, 'dur-base', null, 'base: ' + n.baseDur.toFixed(1) + 'ms');
       ly += 13;
     }
     if (n.nextDur > 0) {
-      g.append('text').attr('x', lx).attr('y', ly).attr('class', 'dur-next').text('next: ' + n.nextDur.toFixed(1) + 'ms');
+      appendText(g, lx, ly, 'dur-next', null, 'next: ' + n.nextDur.toFixed(1) + 'ms');
       ly += 13;
     }
     if (n.baseDur > 0 && n.nextDur > 0) {
-      const delta = n.nextDur - n.baseDur;
       let txt, cls;
       const pct = n.baseDur > 0 ? ((delta / n.baseDur) * 100).toFixed(0) : '0';
-      if (delta > 0.5) { txt = '+' + delta.toFixed(1) + 'ms (+' + pct + '%)'; cls = 'delta-pos'; }
-      else if (delta < -0.5) { txt = delta.toFixed(1) + 'ms (' + pct + '%)'; cls = 'delta-neg'; }
-      else { txt = '~0ms'; cls = ''; }
-      g.append('text').attr('x', lx).attr('y', ly).attr('class', 'dur-delta ' + cls).text(txt);
+      if (delta > 0.5) { txt = '+' + delta.toFixed(1) + 'ms (+' + pct + '%)'; cls = 'dur-delta delta-pos'; }
+      else if (delta < -0.5) { txt = delta.toFixed(1) + 'ms (' + pct + '%)'; cls = 'dur-delta delta-neg'; }
+      else { txt = '~0ms'; cls = 'dur-delta'; }
+      appendText(g, lx, ly, cls, null, txt);
     }
 
     // Tooltip
-    g.on('mouseenter', (e) => {
+    g.addEventListener('mouseenter', (e) => {
       let html = '<div class="tt-op">' + esc(n.name) + ' [' + n.kind + ']</div>';
       if (n.service) html += '<div class="tt-svc">' + esc(n.service) + '</div>';
       html += '<div class="tt-dur">';
@@ -492,13 +464,27 @@ function renderTree(data, baseID, nextID) {
       html += '</div><div class="tt-svc">status: ' + n.status + '</div>';
       tooltip.innerHTML = html;
       tooltip.style.display = 'block';
-    })
-    .on('mousemove', (e) => {
+    });
+    g.addEventListener('mousemove', (e) => {
       tooltip.style.left = (e.clientX + 16) + 'px';
       tooltip.style.top = (e.clientY + 16) + 'px';
-    })
-    .on('mouseleave', () => { tooltip.style.display = 'none'; });
+    });
+    g.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+    svgEl.appendChild(g);
   }
+}
+
+function appendText(parent, x, y, cls, fill, text) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = document.createElementNS(NS, 'text');
+  el.setAttribute('x', String(x));
+  el.setAttribute('y', String(y));
+  el.setAttribute('class', cls);
+  if (fill) el.setAttribute('fill', fill);
+  el.textContent = text;
+  parent.appendChild(el);
+  return el;
 }
 
 function hexPoints(cx, cy, r) {
@@ -510,12 +496,6 @@ function hexPoints(cx, cy, r) {
   return pts.join(' ');
 }
 
-// applyHighlight dims nodes below the delta threshold.
-// The glow (red=slower, green=faster) is always present on nodes with a delta.
-// minDelta controls the threshold: only nodes with |delta| >= |minDelta| stay visible.
-// If minDelta is positive, only slower nodes above the threshold are highlighted.
-// If minDelta is negative, only faster nodes above the threshold are highlighted.
-// If minDelta is 0, all nodes are visible with their default glows.
 function applyHighlight() {
   const raw = parseFloat(document.getElementById('inp-delta').value);
   const threshold = isNaN(raw) ? 0 : raw;
@@ -526,8 +506,8 @@ function applyHighlight() {
   history.replaceState(null, '', '?' + params.toString());
 
   if (threshold === 0 || !lastRenderedNodes.length) {
-    d3.selectAll('.node-group').classed('dimmed', false);
-    d3.selectAll('.edge').classed('dimmed', false);
+    document.querySelectorAll('.node-group').forEach(el => el.classList.remove('dimmed'));
+    document.querySelectorAll('.edge').forEach(el => el.classList.remove('dimmed'));
     return;
   }
 
@@ -535,13 +515,13 @@ function applyHighlight() {
   for (const n of lastRenderedNodes) {
     const delta = (n.baseDur > 0 && n.nextDur > 0) ? n.nextDur - n.baseDur : 0;
     const passes = Math.abs(delta) >= threshold;
-    n._el.classed('dimmed', !passes);
+    n._el.classList.toggle('dimmed', !passes);
     if (passes) visible.add(n);
   }
 
   for (const e of lastRenderedEdges) {
     const show = visible.has(e.parent) || visible.has(e.child);
-    e.el.classed('dimmed', !show);
+    e.el.classList.toggle('dimmed', !show);
   }
 }
 
