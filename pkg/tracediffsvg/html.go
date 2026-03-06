@@ -13,7 +13,7 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
 <title>Trace Diff Viewer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'SF Mono','Menlo','Monaco','Consolas',monospace; background: #0f1117; color: #e0e0e0; }
+  body { font-family: 'SF Mono','Menlo','Monaco','Consolas',monospace; background: #0f1117; color: #e0e0e0; overflow: hidden; }
 
   .toolbar {
     position: sticky; top: 0; z-index: 100;
@@ -55,7 +55,7 @@ var htmlTemplate = template.Must(template.New("diff-view").Parse(`<!DOCTYPE html
   .legend-hex-svg { display: inline-block; width: 18px; height: 18px; vertical-align: middle; }
   .legend-sep { width: 1px; height: 16px; background: #2a2b36; }
 
-  #canvas-wrap { overflow: auto; padding: 20px; min-height: 300px; }
+  #canvas-wrap { overflow: auto; padding: 20px; height: calc(100vh - 74px); }
   #canvas { display: block; transform-origin: 0 0; }
 
   .edge { fill: none; stroke: #3a3b46; stroke-width: 1.5; }
