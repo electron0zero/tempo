@@ -207,26 +207,20 @@ Or visit the landing page to enter trace IDs via a form:
 http://localhost:3200/api/v2/traces/diff/view
 ```
 
+The viewer is a client-side d3.js app that fetches from the existing diff API endpoint (`/api/v2/traces/diff`) with `Accept: application/vnd.grafana.llm`. No server-side rendering - the view endpoint just serves static HTML/JS.
+
 Features:
 - Hexagon tree graph with overlaid base/next durations per operation
+- Operations matched by name + kind across base/next traces
 - Color-coded nodes: red (base-only/removed), green (next-only/added), purple (both/overlaid), yellow (modified), gray (unchanged)
-- Pan and zoom (scroll wheel + click-drag)
-- Hover tooltips on nodes
-- Inline form to quickly diff different trace pairs
+- Duration delta with percentage shown on each overlaid node
+- d3-zoom: scroll wheel to zoom, click-drag to pan, Fit button to auto-fit
+- Hover tooltips with full duration details and % change
+- Inline form to diff different trace pairs without page reload
+- URL updates via pushState for shareable/bookmarkable links
+- Dark theme (Tokyo Night palette)
 
-### 8. Generate SVG via CLI
-
-```bash
-./bin/tempo-cli query api trace-diff-svg http://localhost:3200 <baseTraceID> <nextTraceID> -o diff.svg
-```
-
-**Summarize a diff** (top-K slowest added/removed operations, duration deltas):
-
-```bash
-./bin/tempo-cli query api trace-diff-summary http://localhost:3200 <baseTraceID> <nextTraceID> [--top 10]
-```
-
-### 9. Test via MCP
+### 8. Test via MCP
 
 The MCP server (when enabled via `query_frontend.mcp_server.enabled: true`) exposes a `diff-traces` tool.
 
@@ -236,7 +230,7 @@ The MCP server (when enabled via `query_frontend.mcp_server.enabled: true`) expo
 
 The MCP tool returns the diff in LLM format automatically. You can test it via any MCP client connected to `http://localhost:3200/api/mcp`.
 
-### 10. Run the test script
+### 9. Run the test script
 
 An automated test script covers the diff endpoint, LLM format, error handling, and CLI:
 
@@ -250,7 +244,7 @@ The script auto-discovers trace IDs from the running stack. You can also pass sp
 ./scripts/test-trace-diff.sh <baseTraceID> <nextTraceID>
 ```
 
-### 11. Run unit tests
+### 10. Run unit tests
 
 From the repo root:
 
@@ -260,7 +254,7 @@ go test ./pkg/model/trace/... -run TestDiff -v
 
 Expected: all 9 test cases pass.
 
-### 12. Tear down
+### 11. Tear down
 
 ```bash
 cd example/docker-compose/single-binary
@@ -300,12 +294,9 @@ docker logs single-binary-tempo-1 2>&1 | tail -20
 | `pkg/httpclient/client.go` | `QueryTraceDiff` and `GetLLMFormat` HTTP client methods |
 | `cmd/tempo-cli/cmd-query-trace-diff.go` | CLI `query api trace-diff` command with `--llm` flag |
 | `cmd/tempo-cli/cmd-query-trace-id.go` | Added `--llm` flag to `query api trace-id` |
-| `cmd/tempo-cli/cmd-query-mcp-status.go` | CLI `query api mcp-status` command + shared MCP helpers |
-| `cmd/tempo-cli/cmd-query-mcp-tools.go` | CLI `query api mcp-tools` command |
-| `cmd/tempo-cli/cmd-query-mcp-config.go` | CLI `query api mcp-config` command |
-| `cmd/tempo-cli/cmd-query-trace-diff-summary.go` | CLI `query api trace-diff-summary` command with `--top` flag |
-| `cmd/tempo-cli/cmd-query-trace-diff-svg.go` | CLI `query api trace-diff-svg` command with `-o` flag |
+| `cmd/tempo-cli/cmd-query-mcp-status.go` | CLI `mcp status` command + shared MCP helpers |
+| `cmd/tempo-cli/cmd-query-mcp-tools.go` | CLI `mcp tools` command |
+| `cmd/tempo-cli/cmd-query-mcp-config.go` | CLI `mcp config` command |
 | `cmd/tempo-cli/main.go` | CLI command registration |
-| `pkg/tracediffsvg/render.go` | Shared SVG tree rendering (hexagon graph layout) |
-| `pkg/tracediffsvg/html.go` | HTML wrapper with pan/zoom, tooltips, inline form |
+| `pkg/tracediffsvg/html.go` | d3.js diff viewer page (client-side rendering, served by view endpoint) |
 | `scripts/test-trace-diff.sh` | Automated end-to-end test script |
