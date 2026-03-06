@@ -2,7 +2,6 @@ package querier
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -178,90 +177,14 @@ func (q *Querier) TraceDiffHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (q *Querier) TraceDiffViewHandler(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.TraceByID.QueryTimeout))
-	defer cancel()
-
-	ctx, span := tracer.Start(ctx, "Querier.TraceDiffViewHandler")
-	defer span.End()
-
-	baseID, nextID, err := api.ParseTraceDiffRequest(r)
-	if err != nil {
-		// Serve landing page with empty form if no params.
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(traceDiffViewLanding))
-		return
-	}
-
-	makeReq := func(traceID []byte) *tempopb.TraceByIDRequest {
-		return &tempopb.TraceByIDRequest{
-			TraceID:           traceID,
-			BlockStart:        tempodb.BlockIDMin,
-			BlockEnd:          tempodb.BlockIDMax,
-			QueryMode:         QueryModeAll,
-			AllowPartialTrace: true,
-		}
-	}
-
-	baseResp, err := q.FindTraceByID(ctx, makeReq(baseID), 0, 0)
-	if err != nil {
-		handleError(w, err)
-		return
-	}
-	nextResp, err := q.FindTraceByID(ctx, makeReq(nextID), 0, 0)
-	if err != nil {
-		handleError(w, err)
-		return
-	}
-
-	diffTrace := trace.DiffTraces(baseResp.Trace, nextResp.Trace)
-	diffResp := &tempopb.TraceByIDResponse{
-		Trace:   diffTrace,
-		Metrics: &tempopb.TraceByIDMetrics{},
-	}
-
-	llmJSON, err := combiner.MarshalResponseToLLM(diffResp)
-	if err != nil {
-		http.Error(w, "failed to marshal diff: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var llmResp combiner.LLMTraceByIDResponse
-	if err := json.Unmarshal([]byte(llmJSON), &llmResp); err != nil {
-		http.Error(w, "failed to parse LLM response: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	baseHex := fmt.Sprintf("%x", baseID)
-	nextHex := fmt.Sprintf("%x", nextID)
+	baseID := r.URL.Query().Get("base")
+	nextID := r.URL.Query().Get("next")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tracediffsvg.RenderHTML(w, llmResp, baseHex, nextHex); err != nil {
-		http.Error(w, "failed to render HTML: "+err.Error(), http.StatusInternalServerError)
-		return
+	if err := tracediffsvg.RenderViewPage(w, baseID, nextID); err != nil {
+		http.Error(w, "failed to render page: "+err.Error(), http.StatusInternalServerError)
 	}
 }
-
-const traceDiffViewLanding = `<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"/><title>Trace Diff Viewer</title>
-<style>
-  body { font-family: 'SF Mono',monospace; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
-  .card { background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
-  h2 { margin-bottom: 20px; color: #1a1a2e; }
-  label { display: block; margin: 10px 0 4px; color: #666; font-size: 12px; }
-  input { width: 340px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; }
-  button { margin-top: 16px; padding: 10px 24px; background: #5b6abf; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; }
-  button:hover { background: #4a59ae; }
-</style></head><body>
-<div class="card">
-  <h2>Trace Diff Viewer</h2>
-  <form method="get">
-    <label>Base Trace ID</label><input name="base" placeholder="Enter base trace ID" autofocus/>
-    <label>Next Trace ID</label><input name="next" placeholder="Enter next trace ID"/>
-    <br/><button type="submit">View Diff</button>
-  </form>
-</div>
-</body></html>`
 
 func (q *Querier) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	isSearchBlock := api.IsSearchBlock(r)
